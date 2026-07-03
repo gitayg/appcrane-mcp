@@ -1,0 +1,1079 @@
+[
+  {
+    "name": "appcrane_list_apps",
+    "description": "List all AppCrane apps the current user has access to. Each app includes slug, name, description, urls (production + sandbox), and the version currently live in each environment. Call this first when the user asks about \"my apps\", \"what apps exist\", or before doing anything app-specific. Non-admin users see only their assigned apps; admins (admin or platform_admin) see everything.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "appcrane_get_app",
+    "description": "Get detailed info for a single app: URLs, current versions per environment, recent deployments, and health state. Use this when the user asks \"what's the status of <app>\", \"is <app> deployed\", or after a deploy to confirm what landed. Returns 404-equivalent error if the slug doesn't exist or the caller has no access.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "slug": {
+          "type": "string",
+          "description": "App slug, e.g. \"mysite\""
+        }
+      },
+      "required": [
+        "slug"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "appcrane_top_apps",
+    "description": "Top apps by distinct active users in a lookback window. Useful for \"which apps are getting the most use this week\" or \"what should I deprecate\" type questions. Sourced from app_visits which is recorded on every Caddy forward_auth (one row per user/app/day). Returns rows ordered by user count descending. Admin only.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "days": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 90,
+          "default": 7,
+          "description": "Lookback window. Default 7, max 90."
+        },
+        "top": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 50,
+          "default": 10,
+          "description": "How many rows. Default 10, max 50."
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "appcrane_top_users",
+    "description": "Top users by distinct apps opened in a lookback window. Surfaces who the heaviest cross-app users are — handy for finding power users to interview, or spotting churn risk (a user who used 10 apps last month and 0 this week). Sourced from app_visits. Active users only. Admin only.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "days": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 90,
+          "default": 7,
+          "description": "Lookback window. Default 7, max 90."
+        },
+        "top": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 50,
+          "default": 10,
+          "description": "How many rows. Default 10, max 50."
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "appcrane_get_health",
+    "description": "Fetch the deployed app's health endpoint server-side, bypassing AppCrane's auth proxy. Use this to validate that a deploy actually landed the expected version, or to check if the app is responding. AppCrane hits the app's configured health endpoint (default /api/health) on the internal port directly — no Caddy, no SSO redirect — and returns the response status + body. Defaults to sandbox; pass stage=\"production\" only when the user asks about prod.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "slug": {
+          "type": "string",
+          "description": "App slug, e.g. \"mysite\""
+        },
+        "stage": {
+          "type": "string",
+          "enum": [
+            "sandbox",
+            "production"
+          ],
+          "default": "sandbox",
+          "description": "Target stage (legacy alias: env)."
+        }
+      },
+      "required": [
+        "slug"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "appcrane_get_secret",
+    "description": "Get all secrets (the app's encrypted environment variables) for an app, decrypted. Use this when the user asks about config, secrets, or when you need to verify what env vars are set. Defaults to sandbox; pass stage=\"production\" only when the user explicitly says production. Requires app-admin or AppCrane admin role — non-admin users get a permission error.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "slug": {
+          "type": "string",
+          "description": "App slug, e.g. \"mysite\""
+        },
+        "stage": {
+          "type": "string",
+          "enum": [
+            "sandbox",
+            "production"
+          ],
+          "default": "sandbox",
+          "description": "Target stage (legacy alias: env)."
+        }
+      },
+      "required": [
+        "slug"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "appcrane_deploy",
+    "description": "Trigger a deployment — this IS how you \"update an env to the latest\". For github and managed apps it pulls the latest commit from the app's configured branch on GitHub (server-side, using the app's stored credentials — you do NOT need your own github token or to push/upload anything), builds a fresh Docker image, and swaps in a new container. Use it whenever the user says things like \"update sandbox to the latest\", \"deploy the newest version\", \"pull my latest github changes\", or \"redeploy\". Returns a deployment ID; use appcrane_get_logs to monitor progress. Defaults to sandbox; production requires explicit confirmation from the user.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "slug": {
+          "type": "string",
+          "description": "App slug to deploy"
+        },
+        "stage": {
+          "type": "string",
+          "enum": [
+            "sandbox",
+            "production"
+          ],
+          "default": "sandbox",
+          "description": "Target stage (legacy alias: env)."
+        }
+      },
+      "required": [
+        "slug"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "appcrane_list_releases",
+    "description": "List the deploy/release history for an app + env, newest first — each release is id, version, commit, status (live / rolled_back / failed / pending), who deployed it, and when. Use this to see what is live and to pick a target for appcrane_rollback. App access required.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "slug": {
+          "type": "string"
+        },
+        "stage": {
+          "type": "string",
+          "enum": [
+            "sandbox",
+            "production"
+          ],
+          "default": "sandbox",
+          "description": "Target stage (legacy alias: env)."
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 50,
+          "description": "Max rows (default 10)."
+        }
+      },
+      "required": [
+        "slug"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "appcrane_rollback",
+    "description": "Roll an env back to a prior release. Pass deployment_id (from appcrane_list_releases) to target a specific release, or omit it to roll back to the immediately previous one. Re-runs that release from its recorded build (re-uses the cached per-commit image — no rebuild when it is still retained) and health-checks it. Records a NEW deployment and marks the previous live one rolled_back. Owner-only (or global admin).",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "slug": {
+          "type": "string"
+        },
+        "stage": {
+          "type": "string",
+          "enum": [
+            "sandbox",
+            "production"
+          ],
+          "default": "sandbox",
+          "description": "Target stage (legacy alias: env)."
+        },
+        "deployment_id": {
+          "type": "integer",
+          "description": "Target release id. Omit to roll back to the previous release."
+        }
+      },
+      "required": [
+        "slug"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "appcrane_promote",
+    "description": "Promote the current live SANDBOX release to production — the gated sandbox→prod path. Refuses unless sandbox is live AND currently healthy (you do not ship a broken sandbox to prod), and the promoted prod release is health-checked with auto-revert. For github apps this rebuilds production from the EXACT sandbox commit; for managed/upload apps it copies the exact tested sandbox release. Owner-only (or global admin).",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "slug": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "slug"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "appcrane_list_requests",
+    "description": "List enhancement requests filed against an app via the AppCrane intake form. Use this when the user asks \"what should I work on?\", \"what's queued for X?\", or wants to pick up tickets. Returns id, message, app_slug, submitter, and bucket. Buckets: triage (unclaimed), in_progress (someone is working on it), shipped (merged + deployed), validated (requester confirmed). Filter by bucket=\"triage\" to find work to pick up.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "slug": {
+          "type": "string",
+          "description": "Filter by app slug. Omit to see across all accessible apps."
+        },
+        "bucket": {
+          "type": "string",
+          "enum": [
+            "triage",
+            "in_progress",
+            "shipped",
+            "validated"
+          ],
+          "description": "Filter to one bucket. Most useful: \"triage\" for unclaimed work."
+        },
+        "limit": {
+          "type": "number",
+          "default": 20,
+          "minimum": 1,
+          "maximum": 100
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "appcrane_set_request_status",
+    "description": "Move a request through the lifecycle: triage → in_progress → shipped → validated. Use this when the user says \"I'll take #42\" (set to in_progress), after merging a PR (set to shipped), or after confirming a fix works (set to validated). Validated requests are considered closed. Requires app-admin or AppCrane admin role.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "number",
+          "description": "Request id (the # column)."
+        },
+        "bucket": {
+          "type": "string",
+          "enum": [
+            "triage",
+            "in_progress",
+            "shipped",
+            "validated"
+          ],
+          "description": "Target bucket."
+        }
+      },
+      "required": [
+        "id",
+        "bucket"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "appcrane_ls",
+    "description": "List files inside a running app container at a specific path. Use to verify what actually got built / what files made it into the deployed image. Read-only; bound to safe roots (/app and /data only). Returns the directory listing as text.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "slug": {
+          "type": "string"
+        },
+        "stage": {
+          "type": "string",
+          "enum": [
+            "sandbox",
+            "production"
+          ],
+          "default": "sandbox",
+          "description": "Target stage (legacy alias: env)."
+        },
+        "path": {
+          "type": "string",
+          "description": "Absolute path inside the container, must start with /app or /data",
+          "default": "/app"
+        }
+      },
+      "required": [
+        "slug"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "appcrane_cat",
+    "description": "Print the contents of a file inside a running app container. Read-only; bound to safe roots (/app and /data only). Refuses files larger than 256KB; truncate by reading the first N bytes via path tricks if you need a tail.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "slug": {
+          "type": "string"
+        },
+        "stage": {
+          "type": "string",
+          "enum": [
+            "sandbox",
+            "production"
+          ],
+          "default": "sandbox",
+          "description": "Target stage (legacy alias: env)."
+        },
+        "path": {
+          "type": "string",
+          "description": "Absolute path inside the container, must start with /app or /data"
+        }
+      },
+      "required": [
+        "slug",
+        "path"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "appcrane_push_staged_file",
+    "description": "Move a previously-staged file into a running container at a path under /app or /data. THE WAY TO GET LARGE BINARIES (DMGs, datasets, bundles) into a container when they're too big to inline through appcrane_cp. Two steps: (1) upload the bytes with a plain multipart POST to `curl -F file=@local.dmg -H \"X-API-Key: <your dhk_mcp_ key>\" https://<host>/api/files/staged` — your MCP key IS allowed on this endpoint (v2.10.6+); it returns { token, sha256, size_bytes }. (2) Call this tool with that token and a dest path. The container must be running. Path is validated (no \"..\", must start with /app or /data). The staged blob is deleted on success.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "slug": {
+          "type": "string",
+          "description": "Target app slug"
+        },
+        "stage": {
+          "type": "string",
+          "enum": [
+            "sandbox",
+            "production"
+          ],
+          "default": "sandbox",
+          "description": "Target stage (legacy alias: env)."
+        },
+        "token": {
+          "type": "string",
+          "description": "Token returned by POST /api/files/staged"
+        },
+        "dest": {
+          "type": "string",
+          "description": "Absolute container path under /app or /data — destination file or directory"
+        }
+      },
+      "required": [
+        "slug",
+        "token",
+        "dest"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "appcrane_wait_deploy",
+    "description": "Block until a deployment reaches a terminal state (live / failed / rolled_back), then return its final status. Use after appcrane_deploy instead of polling appcrane_get_logs in a loop. Returns immediately if the deployment is already terminal. Defaults to 180s timeout, hard-capped at 600s. On timeout, returns { status: \"pending\", timed_out: true } so the caller can decide whether to keep waiting.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "deployment_id": {
+          "type": "number",
+          "description": "Deployment id from appcrane_deploy"
+        },
+        "timeout_sec": {
+          "type": "number",
+          "description": "How long to wait. Default 180s, max 600s.",
+          "default": 180
+        }
+      },
+      "required": [
+        "deployment_id"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "appcrane_get_deploy_log",
+    "description": "Read the deploy/build log for a specific deployment — the output that came out of clone / npm install / docker build / health-validate, BEFORE the container started running. This is what you want when a deploy fails fast (1-2 second failures are almost always pre-build errors that never reach the runtime container, so appcrane_get_logs has nothing to show). Pass a deployment_id from appcrane_deploy / appcrane_get_app.recent_deployments, OR omit it and pass slug+env to get the latest deployment's log.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "deployment_id": {
+          "type": "integer",
+          "description": "Specific deployment id. Preferred — unambiguous."
+        },
+        "slug": {
+          "type": "string",
+          "description": "App slug. Required when deployment_id is not given."
+        },
+        "stage": {
+          "type": "string",
+          "enum": [
+            "sandbox",
+            "production"
+          ],
+          "description": "Required when deployment_id is not given. Target stage (legacy alias: env)."
+        },
+        "tail": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 5000,
+          "default": 500,
+          "description": "Return only the last N lines. Defaults to 500; full log can be many KB on a long build."
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "appcrane_get_logs",
+    "description": "Get recent runtime logs from a running app container (docker logs). Use this for runtime issues — once the container is up. Returns the most recent N lines (default 100, max 1000). Pass search to filter to lines containing a substring (case-insensitive). NOT the right tool for fast deploy failures (1-2 second exits, \"no such container\" errors): those happen during clone / npm install / docker build / health-validate, BEFORE any container exists. Use appcrane_get_deploy_log for that.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "slug": {
+          "type": "string"
+        },
+        "stage": {
+          "type": "string",
+          "enum": [
+            "sandbox",
+            "production"
+          ],
+          "default": "sandbox",
+          "description": "Target stage (legacy alias: env)."
+        },
+        "lines": {
+          "type": "number",
+          "default": 100,
+          "minimum": 1,
+          "maximum": 1000
+        },
+        "search": {
+          "type": "string",
+          "description": "Filter to lines containing this substring (case-insensitive)"
+        }
+      },
+      "required": [
+        "slug"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "appcrane_create_app",
+    "description": "Register a new app in AppCrane from a GitHub repository. Use this only after the user has explicitly confirmed they want to onboard a new app and provided a real github URL. Allocates ports, creates the data directories, configures Caddy routing, and starts health checks. After this returns, call appcrane_set_secret to set any required secrets, then appcrane_deploy to ship the first build. Requires the create-apps permission (global admins, or any role a platform admin granted at Settings → Roles).",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Display name (shown in dashboard)"
+        },
+        "slug": {
+          "type": "string",
+          "description": "URL-safe identifier — lowercase letters, digits, dashes; must start with a letter or digit. Lives at /<slug>/."
+        },
+        "github_url": {
+          "type": "string",
+          "description": "GitHub repo URL, e.g. https://github.com/me/mysite"
+        },
+        "branch": {
+          "type": "string",
+          "description": "Branch to track. Default: main",
+          "default": "main"
+        },
+        "description": {
+          "type": "string"
+        },
+        "domain": {
+          "type": "string",
+          "description": "Optional custom domain. If omitted, the app lives under CRANE_DOMAIN/<slug>/."
+        },
+        "github_token": {
+          "type": "string",
+          "description": "GitHub PAT for private repos. Stored encrypted; only used to clone."
+        },
+        "max_ram_mb": {
+          "type": "number",
+          "description": "Per-container memory cap. Default: 512."
+        },
+        "max_cpu_percent": {
+          "type": "number",
+          "description": "Per-container CPU cap. Default: 50."
+        }
+      },
+      "required": [
+        "name",
+        "slug",
+        "github_url"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "appcrane_update_app",
+    "description": "Patch fields on an existing app. Use this to fix a missing github_url after the fact, change branch, rotate the github_token, retag with category/visibility, or adjust resource limits — anything you would otherwise need direct DB access for. Only includes fields you pass; omitted fields are left alone. To clear a string field pass an empty string. Returns the same shape as appcrane_get_app.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "slug": {
+          "type": "string",
+          "description": "App slug to update."
+        },
+        "name": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "category": {
+          "type": "string"
+        },
+        "domain": {
+          "type": "string"
+        },
+        "source_type": {
+          "type": "string",
+          "enum": [
+            "github",
+            "managed",
+            "managed_legacy"
+          ]
+        },
+        "github_url": {
+          "type": "string",
+          "description": "github.com URL of the source repo. Pass empty string to clear."
+        },
+        "branch": {
+          "type": "string"
+        },
+        "github_token": {
+          "type": "string",
+          "description": "PAT for private clones. Stored encrypted (AES-256-GCM). Omit to leave the existing token alone; pass empty string to clear it; pass a value to rotate."
+        },
+        "visibility": {
+          "type": "string",
+          "enum": [
+            "public",
+            "private",
+            "hidden"
+          ]
+        },
+        "public_access": {
+          "type": "integer",
+          "enum": [
+            0,
+            1
+          ]
+        },
+        "image_retention": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 50
+        },
+        "frame_ancestors": {
+          "type": "string"
+        },
+        "auth_bypass_paths": {
+          "type": "array",
+          "maxItems": 10,
+          "items": {
+            "type": "string"
+          },
+          "description": "v2.7.27: array of path prefixes (e.g. [\"/ws/local-runner\"]) that bypass SSO forward_auth on this app. Requests under these prefixes reach the container with NO X-AppCrane-* identity headers — the app authenticates them itself (e.g. token in query string). Caddy suppresses access logging for these paths to prevent token leakage to log storage. Pass [] or null to clear."
+        },
+        "max_ram_mb": {
+          "type": "number",
+          "description": "Per-container memory cap."
+        },
+        "max_cpu_percent": {
+          "type": "number",
+          "description": "Per-container CPU cap (0-100)."
+        }
+      },
+      "required": [
+        "slug"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "appcrane_set_app_meta",
+    "description": "Set an app's category, visibility, auth_mode, and/or auth_bypass_paths — the owner self-service fields (same controls the dashboard Launcher exposes to owners). Owner of the app (or global admin) required. visibility is one of public / private / hidden. auth_mode is `authenticated` (default — all routes go through AppCrane SSO) or `headless` (the app bypasses forward_auth ENTIRELY and is reachable without identity — right tool for telemetry ingest, public webhooks, status pages; the app's own server is responsible for any payload-level authn). auth_bypass_paths (v2.7.27+) is an array of path prefixes (e.g. [\"/ws/local-runner\"]) that bypass SSO on this app only — narrower than headless mode; the app authenticates those paths itself (e.g. token in query string). The platform strips incoming X-AppCrane-* headers on bypass paths (forgery defense intact) and suppresses access logging for them (token-in-query never sits in log storage). Owners may only assign an EXISTING category; creating a brand-new category is reserved for global admins. For powerful fields (github_url, branch, token, source_type, resource limits) use appcrane_update_app (admin only).",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "slug": {
+          "type": "string",
+          "description": "App slug."
+        },
+        "category": {
+          "type": "string",
+          "description": "Category/tag. Owners must pick one already in use; pass empty string to clear."
+        },
+        "visibility": {
+          "type": "string",
+          "enum": [
+            "public",
+            "private",
+            "hidden"
+          ],
+          "description": "public = anyone; private = assigned users; hidden = not discoverable."
+        },
+        "auth_mode": {
+          "type": "string",
+          "enum": [
+            "authenticated",
+            "headless"
+          ],
+          "description": "authenticated = AppCrane SSO + per-app role checks; headless = NO auth at the proxy (the entire app is reachable by anyone on the internet)."
+        },
+        "auth_bypass_paths": {
+          "type": "array",
+          "maxItems": 10,
+          "items": {
+            "type": "string"
+          },
+          "description": "v2.7.27: array of path prefixes (e.g. [\"/ws/local-runner\"]) that bypass SSO forward_auth on this app. Requests under these prefixes reach the container with NO X-AppCrane-* identity headers — the app authenticates them itself. Caddy suppresses access logging for these paths to prevent query-string-token leakage. Pass [] or null to clear."
+        },
+        "domain": {
+          "type": "string",
+          "description": "v2.10.0: custom domain (e.g. \"raise.glick.run\") that serves this app at the ROOT of that domain with NO AppCrane SSO and NO topbar — the app does its own auth. Maps to production. Requires the domain's DNS to point at this host (Caddy auto-provisions TLS). Pass \"\" or null to remove. The /<slug> path under the platform domain stays."
+        }
+      },
+      "required": [
+        "slug"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "appcrane_list_app_members",
+    "description": "List every user who has access to an app, with their per-app role (owner / admin / user / viewer / none). Use this before granting or revoking to see who is already in. Returns email + name + role for each member. App-admin or owner of the app required (or global admin / platform_admin).",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "slug": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "slug"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "appcrane_grant_app_access",
+    "description": "Grant a user access to an app at a specific per-app role. `user` accepts a numeric user id, an email, or a username — first match wins. role defaults to \"user\". Idempotent: existing rows are upgraded/downgraded to the new role. App-admin or owner of the app required (or global admin).",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "slug": {
+          "type": "string"
+        },
+        "user": {
+          "type": "string",
+          "description": "User id (numeric string), email, or username"
+        },
+        "role": {
+          "type": "string",
+          "enum": [
+            "user",
+            "admin",
+            "owner"
+          ],
+          "default": "user"
+        }
+      },
+      "required": [
+        "slug",
+        "user"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "appcrane_revoke_app_access",
+    "description": "Remove a user's access from an app entirely. Idempotent: returns ok even if the user had no access. App-admin or owner of the app required (or global admin). Refuses to remove the only remaining owner.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "slug": {
+          "type": "string"
+        },
+        "user": {
+          "type": "string",
+          "description": "User id, email, or username"
+        }
+      },
+      "required": [
+        "slug",
+        "user"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "appcrane_list_access_requests",
+    "description": "List pending access requests — enhancement_requests rows whose message starts with \"Access request for app …\" (the portal's Request-access button posts these). With slug, scopes to one app; without, returns access requests across every app the caller can administer. App-admin / owner / global admin required.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "slug": {
+          "type": "string",
+          "description": "Optional. Limit to one app."
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "appcrane_approve_access_request",
+    "description": "Approve a pending access request: grants the requester access to the app at `role` (default \"user\") and marks the enhancement_request as done. Verifies the request is actually an access request before acting. App-admin / owner / global admin required.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "request_id": {
+          "type": "integer",
+          "description": "enhancement_requests.id from appcrane_list_access_requests"
+        },
+        "role": {
+          "type": "string",
+          "enum": [
+            "user",
+            "admin",
+            "owner"
+          ],
+          "default": "user"
+        }
+      },
+      "required": [
+        "request_id"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "appcrane_deny_access_request",
+    "description": "Deny a pending access request: marks the enhancement_request as done WITHOUT granting access. Optionally appends a reason to the original message so the requester (and the audit trail) sees why. App-admin / owner / global admin required.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "request_id": {
+          "type": "integer"
+        },
+        "reason": {
+          "type": "string",
+          "description": "Optional. Appended to the request message."
+        }
+      },
+      "required": [
+        "request_id"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "appcrane_set_app_icon",
+    "description": "Set the tile icon for an app (shown on the Dashboard, the Launcher cards, the Manage table, and the frame topbar). Accepts a base64-encoded image in PNG / SVG / WEBP / JPEG / GIF. For repo-tracked icons prefer committing public/icon.png to the repo — AppCrane picks it up automatically on each deploy. Use this MCP tool when the icon needs to change without a redeploy, or when the source isn't in the repo. Replaces any existing icon. App-admin or owner required (or global admin).",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "slug": {
+          "type": "string",
+          "description": "App slug."
+        },
+        "format": {
+          "type": "string",
+          "enum": [
+            "png",
+            "svg",
+            "webp",
+            "jpg",
+            "jpeg",
+            "gif"
+          ],
+          "description": "Image format. Determines the on-disk file extension (icon.<format>)."
+        },
+        "base64": {
+          "type": "string",
+          "description": "Base64-encoded image payload. May or may not include the data URL prefix (data:image/png;base64,…) — both work. Max 500 KB decoded."
+        }
+      },
+      "required": [
+        "slug",
+        "format",
+        "base64"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "appcrane_get_guide",
+    "description": "Fetch the latest AppCrane playbook on a given topic. Use this at the START of any non-trivial workflow so you operate on the current authoritative guidance, not on whatever you remember from a past session. Topics: \"onboarding\" = the full new-app onboarding playbook (paths a/b/c/d, health-endpoint contract, common pitfalls). \"operations\" = the comprehensive agent operations guide (deploy, env, logs, rollback, every appcrane_* tool). \"email\" = how a hosted app sends email through AppCrane (the /api/service/email endpoint, env vars, recipient rules). Topic defaults to \"onboarding\" if omitted. Returns markdown.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "topic": {
+          "type": "string",
+          "enum": [
+            "onboarding",
+            "operations",
+            "email"
+          ],
+          "description": "Which guide to fetch. Default: onboarding."
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "appcrane_create_managed_app",
+    "description": "Create a new app using AppCrane's GitHub service-account — the platform creates a repo on the configured org/user, owns it, and the agent works against it through github_* tools without the end user ever needing their own PAT. Use this when the user does not have a GitHub account or does not want to deal with GitHub at all. Requires the platform admin to have configured the service-account in Settings → GitHub. Returns the same shape as appcrane_create_app, plus the auto-created repo metadata. IDEMPOTENT RECOVERY: if the slug already exists as a managed app but its AMC_ repo was never created (a half-created app from an earlier failure — push then returns REPO_NOT_FOUND), calling this again re-provisions the missing repo and returns { repaired: true } instead of erroring. So if a create attempt half-failed, just call it again with the same slug. Owner-or-admin to repair an existing one.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Display name (human-readable)"
+        },
+        "slug": {
+          "type": "string",
+          "description": "URL slug, lowercase-alphanumeric-with-dashes. Becomes the repo name."
+        },
+        "description": {
+          "type": "string",
+          "description": "Optional. Used as both app description and repo description."
+        },
+        "branch": {
+          "type": "string",
+          "description": "Default branch for the new repo. Defaults to \"main\"."
+        },
+        "domain": {
+          "type": "string",
+          "description": "Optional custom domain."
+        },
+        "max_ram_mb": {
+          "type": "number",
+          "description": "Per-container memory cap. Default: 512."
+        },
+        "max_cpu_percent": {
+          "type": "number",
+          "description": "Per-container CPU cap. Default: 50."
+        }
+      },
+      "required": [
+        "name",
+        "slug"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "appcrane_push_to_managed_app",
+    "description": "Push a batch of files to a managed app's AMC_<slug> repo, authenticated server-side via AppCrane's service-account credential. Use this — NOT github_push_files — for managed apps, because github_* tools authenticate with the caller's personal PAT, which has zero access to the service account's repos. Multiple files become a single commit. files: [{ path, content, encoding? }] where encoding defaults to \"utf-8\" (use \"base64\" for binaries like icons). Requires the app to already exist via appcrane_create_managed_app. v2.7.22: response now includes per-file `sha256` (hex) and decoded `bytes` length so you can verify integrity — compute the SHA-256 of the bytes you sent, compare to the server's echo, and fail loudly if they differ. Essential for binary files where inline-string truncation or trailing-byte issues would otherwise produce a silently-broken commit. v2.10.7: for a large CODE file, do NOT inline it — upload the bytes over HTTP and commit by token. (1) `curl -F file=@big.js -H \"X-API-Key: <your dhk_mcp_ key>\" https://<host>/api/files/staged` returns { token, sha256, size_bytes }. (2) Pass that file as { path, staged_token } instead of { path, content }. The server reads the staged bytes and commits them verbatim, so 100+ KB sources push reliably without the model having to emit the content (which is where inline truncation comes from). Per file, provide exactly one of content or staged_token. Staged tokens are owner-scoped and expiring.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "slug": {
+          "type": "string",
+          "description": "Managed app slug. Repo name resolved as AMC_<slug>."
+        },
+        "files": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 200,
+          "items": {
+            "type": "object",
+            "properties": {
+              "path": {
+                "type": "string",
+                "description": "Repo-relative path (no leading slash, no ..)"
+              },
+              "content": {
+                "type": "string",
+                "description": "Inline file content. For binary, base64-encode and set encoding=\"base64\". Omit when using staged_token."
+              },
+              "encoding": {
+                "type": "string",
+                "enum": [
+                  "utf-8",
+                  "base64"
+                ],
+                "description": "Defaults to utf-8. Ignored when staged_token is used (staged bytes are committed as-is)."
+              },
+              "staged_token": {
+                "type": "string",
+                "description": "Token from POST /api/files/staged. Commits the uploaded bytes verbatim — use instead of content for large code files. Exactly one of content / staged_token per file."
+              }
+            },
+            "required": [
+              "path"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "message": {
+          "type": "string",
+          "description": "Commit message. Defaults to \"chore: scaffolding for <slug>\"."
+        },
+        "branch": {
+          "type": "string",
+          "description": "Target branch. Defaults to the repo's default branch (usually \"main\")."
+        }
+      },
+      "required": [
+        "slug",
+        "files"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "appcrane_set_secret",
+    "description": "Set or update a secret (an encrypted environment variable injected into the app). Encrypted at rest; only the running app process can read the plaintext. Defaults to sandbox; require explicit stage=\"production\" only when the user asks. App-admin or AppCrane admin only. Respects the caller's mcp_app_scope.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "slug": {
+          "type": "string"
+        },
+        "stage": {
+          "type": "string",
+          "enum": [
+            "sandbox",
+            "production"
+          ],
+          "default": "sandbox",
+          "description": "Target stage (legacy alias: env)."
+        },
+        "key": {
+          "type": "string",
+          "description": "Env var name. Letters, digits, underscores; must not start with a digit."
+        },
+        "value": {
+          "type": "string",
+          "description": "The value to store (will be encrypted server-side)."
+        }
+      },
+      "required": [
+        "slug",
+        "key",
+        "value"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "appcrane_cp",
+    "description": "Copy/upload a file straight into the app's persistent /data volume on the host (aliases: appcrane_upload, appcrane_set_data_blob) — single hop, no container round-trip, no GitHub round-trip, no inline size ceiling. The bytes land at /data/apps/<slug>/<env>/shared/data/<path>, which is the SAME path the running container sees mounted as /data/<path>. Right tool for multi-MB datasets, large fixtures, or anything where appcrane_push_to_managed_app's tool-arg ceiling would force chunking. Returns the SHA-256 + byte count of what was stored so the caller can verify integrity. App-admin or owner of the app required. NEVER returns secrets in the response. Path must be repo-relative, no `..`, no leading slash.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "slug": {
+          "type": "string",
+          "description": "App slug."
+        },
+        "stage": {
+          "type": "string",
+          "enum": [
+            "sandbox",
+            "production"
+          ],
+          "default": "sandbox",
+          "description": "Which env's /data volume to write to. Target stage (legacy alias: env)."
+        },
+        "path": {
+          "type": "string",
+          "description": "Path within /data, e.g. \"datasets/threats.json\" or \"cache/build.tar.gz\". No leading slash, no \"..\"."
+        },
+        "content": {
+          "type": "string",
+          "description": "The data to write. utf-8 string or base64-encoded bytes depending on encoding."
+        },
+        "encoding": {
+          "type": "string",
+          "enum": [
+            "utf-8",
+            "base64"
+          ],
+          "default": "utf-8",
+          "description": "Defaults to utf-8. Use base64 for binary blobs."
+        }
+      },
+      "required": [
+        "slug",
+        "path",
+        "content"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "appcrane_list_cron",
+    "description": "List the scheduled jobs declared in an app's deployhub.json `cron` array (after the most recent deploy). Each entry includes the cron schedule, the command, when it last ran, the exit code, and the tail of the last run's stdout/stderr. Use to verify a job was registered, debug a missing run, or read the recent log. App-admin or owner.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "slug": {
+          "type": "string"
+        },
+        "stage": {
+          "type": "string",
+          "enum": [
+            "sandbox",
+            "production"
+          ],
+          "description": "Optional — omit to list both envs. Target stage (legacy alias: env)."
+        }
+      },
+      "required": [
+        "slug"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "appcrane_run_cron_now",
+    "description": "Trigger a scheduled cron job RIGHT NOW, regardless of its schedule. Useful for \"I want to test my daily rebuild without waiting until midnight\" or \"rerun yesterday's failed job.\" Runs the same `docker exec` the tick loop would, against the app's container; updates last_run_at / last_exit_code / last_log just like a scheduled run. Returns the exit code and last-log tail. App-admin or owner. Idempotent: if the job is already running (mutex held), reports it and skips rather than overlapping.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "slug": {
+          "type": "string"
+        },
+        "stage": {
+          "type": "string",
+          "enum": [
+            "sandbox",
+            "production"
+          ],
+          "default": "sandbox",
+          "description": "Target stage (legacy alias: env)."
+        },
+        "name": {
+          "type": "string",
+          "description": "Job name from deployhub.json `cron[].name`."
+        }
+      },
+      "required": [
+        "slug",
+        "name"
+      ],
+      "additionalProperties": false
+    }
+  }
+]

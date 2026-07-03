@@ -1,0 +1,46 @@
+{
+  "name": "appcrane-mcp",
+  "version": "1.0.0",
+  "description": "Standalone MCP connector for AppCrane — the self-hosted deployment platform for AI-built apps. Serves the appcrane_* tool catalog for offline introspection and proxies real tool calls to your AppCrane instance.",
+  "type": "module",
+  "license": "MIT",
+  "author": "AppCrane",
+  "homepage": "https://glick.run/appcrane.html",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/gitayg/appCrane.git"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "appcrane",
+    "deployment",
+    "self-hosted",
+    "connector"
+  ],
+  "bin": {
+    "appcrane-mcp": "dist/index.js"
+  },
+  "files": [
+    "dist",
+    "catalog.json",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "gen:catalog": "node scripts/gen-catalog.mjs",
+    "prepublishOnly": "npm run build",
+    "start": "node dist/index.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.19.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.0",
+    "typescript": "^5.6.0"
+  }
+}
