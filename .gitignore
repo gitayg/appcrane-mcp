@@ -3,3 +3,6 @@ dist/
 *.log
 .DS_Store
 .env
+
+# squash code index — a build artifact, not source
+*.scip

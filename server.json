@@ -1,0 +1,47 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.gitayg/appcrane",
+  "title": "AppCrane",
+  "description": "Deploy and manage apps on your own AppCrane instance, the self-hosted PaaS for AI-built apps.",
+  "version": "1.1.0",
+  "websiteUrl": "https://glick.run/appcrane.html",
+  "repository": {
+    "url": "https://github.com/gitayg/appcrane-mcp",
+    "source": "github"
+  },
+  "packages": [
+    {
+      "registryType": "npm",
+      "registryBaseUrl": "https://registry.npmjs.org",
+      "identifier": "appcrane-mcp",
+      "version": "1.1.0",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "APPCRANE_URL",
+          "description": "Base URL of your own AppCrane instance, e.g. https://crane.example.com. Without it the connector still starts and answers tools/list from the bundled catalog, but cannot execute tools.",
+          "format": "string",
+          "isRequired": false,
+          "isSecret": false,
+          "placeholder": "https://crane.example.com"
+        },
+        {
+          "name": "APPCRANE_KEY",
+          "description": "Your AppCrane API key, sent to the instance as the X-API-Key header. Required to execute tools.",
+          "format": "string",
+          "isRequired": false,
+          "isSecret": true
+        },
+        {
+          "name": "APPCRANE_GITHUB_TOKEN",
+          "description": "Optional GitHub personal access token, sent as X-Github-Token, to unlock the github_* passthrough tools.",
+          "format": "string",
+          "isRequired": false,
+          "isSecret": true
+        }
+      ]
+    }
+  ]
+}

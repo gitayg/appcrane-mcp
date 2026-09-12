@@ -10,7 +10,7 @@
   },
   {
     "name": "appcrane_get_app",
-    "description": "Get detailed info for a single app: URLs, current versions per environment, recent deployments, and health state. Use this when the user asks \"what's the status of <app>\", \"is <app> deployed\", or after a deploy to confirm what landed. Returns 404-equivalent error if the slug doesn't exist or the caller has no access.",
+    "description": "Get detailed info for a single app: URLs, current versions per environment, recent deployments, and health state. Use this when the user asks \"what's the status of <app>\", \"is <app> deployed\", or after a deploy to confirm what landed. Returns 404-equivalent error if the slug doesn't exist or the caller has no access. config.auth_mode tells you whether the app gets identity at all: `authenticated` means routes go through forward_auth and arrive at the container with X-AppCrane-* headers; `headless` means forward_auth is skipped for the whole app and those headers NEVER arrive. Check it first when debugging \"my app sees no identity headers\", but note it is per-APP, not per-request: an `authenticated` app can still have auth_bypass_paths prefixes that skip forward_auth, and a custom domain is never gated either. The request itself is authoritative — the app can read X-AppCrane-Auth-Mode (authenticated / headless / bypass), which AppCrane stamps on every route it proxies.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -101,7 +101,7 @@
   },
   {
     "name": "appcrane_get_secret",
-    "description": "Get all secrets (the app's encrypted environment variables) for an app, decrypted. Use this when the user asks about config, secrets, or when you need to verify what env vars are set. Defaults to sandbox; pass stage=\"production\" only when the user explicitly says production. Requires app-admin or AppCrane admin role — non-admin users get a permission error.",
+    "description": "List an app's secrets (encrypted env vars) with their values MASKED — safe to show in chat. For each key you get: is_set, length, a short preview (last 3 chars, rest masked; fully masked for short values), a sha256 `fingerprint` (compare two envs or detect a changed value without seeing it), and updated_at. This is what you want for \"is X set?\", \"did the key change?\", \"which vars exist?\". Does NOT return plaintext — a secret never lands in the transcript. To read one actual value, use appcrane_reveal_secret with a specific key. Defaults to sandbox; pass env=\"production\" only when the user explicitly says production. App-admin or AppCrane admin only.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -126,8 +126,39 @@
     }
   },
   {
+    "name": "appcrane_reveal_secret",
+    "description": "Reveal the PLAINTEXT of ONE secret by key. Use ONLY when the user explicitly needs the actual value — it will appear in this conversation transcript, so treat the transcript as sensitive afterward (and consider rotating the secret if the transcript may be stored/shared). For checking whether a var is set, comparing values, or seeing what exists, use appcrane_get_secret (masked) instead — do NOT reveal just to inspect config. Single key only — it never dumps the whole env. Every reveal is audit-logged. Defaults to sandbox; env=\"production\" only when the user explicitly asks. App-admin or AppCrane admin only.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "slug": {
+          "type": "string",
+          "description": "App slug, e.g. \"mysite\""
+        },
+        "stage": {
+          "type": "string",
+          "enum": [
+            "sandbox",
+            "production"
+          ],
+          "default": "sandbox",
+          "description": "Target stage (legacy alias: env)."
+        },
+        "key": {
+          "type": "string",
+          "description": "Exact env var name to reveal (e.g. \"RESEND_API_KEY\"). One key per call."
+        }
+      },
+      "required": [
+        "slug",
+        "key"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
     "name": "appcrane_deploy",
-    "description": "Trigger a deployment — this IS how you \"update an env to the latest\". For github and managed apps it pulls the latest commit from the app's configured branch on GitHub (server-side, using the app's stored credentials — you do NOT need your own github token or to push/upload anything), builds a fresh Docker image, and swaps in a new container. Use it whenever the user says things like \"update sandbox to the latest\", \"deploy the newest version\", \"pull my latest github changes\", or \"redeploy\". Returns a deployment ID; use appcrane_get_logs to monitor progress. Defaults to sandbox; production requires explicit confirmation from the user.",
+    "description": "Trigger a deployment — this IS how you \"update an env to the latest\". For github and managed apps it pulls the latest commit from the app's configured branch on GitHub (server-side, using the app's stored credentials — you do NOT need your own github token or to push/upload anything), builds a fresh Docker image, and swaps in a new container. Use it whenever the user says things like \"update sandbox to the latest\", \"deploy the newest version\", \"pull my latest github changes\", or \"redeploy\". Returns a deployment ID; use appcrane_get_logs to monitor progress. Defaults to sandbox; production requires explicit confirmation from the user. DATA LOSS: a deploy destroys and recreates the container, so any path the app persists that AppCrane is not mounting is lost. When that is the case this tool REFUSES and its error names the exact paths; show them to the user, get a real answer, and only then retry with acknowledge_data_loss=true. Do not set acknowledge_data_loss pre-emptively.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -143,6 +174,10 @@
           ],
           "default": "sandbox",
           "description": "Target stage (legacy alias: env)."
+        },
+        "acknowledge_data_loss": {
+          "type": "boolean",
+          "description": "Confirms that the state at the paths named in this tool's DATA_LOSS_NOT_ACKNOWLEDGED error may be destroyed. Only set it after the error has told you which paths those are AND the user has agreed to lose them. Ignored when nothing is at risk."
         }
       },
       "required": [
@@ -346,6 +381,173 @@
     }
   },
   {
+    "name": "appcrane_stage_from_url",
+    "description": "Stage a file by having AppCrane DOWNLOAD it, and return its token. THE CHEAPEST WAY to get a large artifact in: the bytes go host-to-host and never pass through your context, so a 600KB bundle costs the same handful of tokens as a 6KB one. Prefer this over appcrane_stage_chunk for anything bigger than a small text file. Give it a URL your build already produces — a GitHub release asset, an S3/R2 presigned URL, any https link the server can reach. Pass sha256 to have the downloaded bytes verified before a token is issued. Then deploy with appcrane_deploy_artifact. https only; redirects are not followed; private and link-local addresses are refused.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string",
+          "description": "Direct https URL to the file. Must not redirect — give the final URL."
+        },
+        "filename": {
+          "type": "string",
+          "description": "Name to stage it under. For a deploy it must end in .zip, .tar.gz or .tgz. Defaults to the last path segment."
+        },
+        "sha256": {
+          "type": "string",
+          "description": "Optional hex SHA-256 of the file, verified before the token is issued."
+        }
+      },
+      "required": [
+        "url"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "appcrane_stage_chunk",
+    "description": "Upload one part of a SMALL file to AppCrane over MCP. For anything bigger than a few KB use appcrane_stage_from_url instead — the bytes here are emitted by the model, so they cost output tokens per character and fail on a single typo. Capped at 8 parts for that reason. Split the file into parts small enough for a tool call (~256KB of base64 each is comfortable), send each with the same `session` and `of`, then call appcrane_stage_assemble. Parts may be sent in any order and re-sent to replace a corrupted one; the reply lists which parts are still missing. Use encoding=\"base64\" for anything binary. Pass sha256 of THIS part to have it verified on arrival.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "session": {
+          "type": "string",
+          "description": "Opaque id grouping the parts of one file. Any unique string; reuse it for every part."
+        },
+        "part": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "1-based part number."
+        },
+        "of": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Total number of parts. Identical across every part of a session."
+        },
+        "content": {
+          "type": "string",
+          "description": "This part's bytes, encoded per `encoding`."
+        },
+        "encoding": {
+          "type": "string",
+          "enum": [
+            "utf-8",
+            "base64"
+          ],
+          "description": "Defaults to utf-8. Use base64 for binary."
+        },
+        "sha256": {
+          "type": "string",
+          "description": "Optional hex SHA-256 of this part, verified on arrival."
+        }
+      },
+      "required": [
+        "session",
+        "part",
+        "of",
+        "content"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "appcrane_stage_assemble",
+    "description": "Join the parts pushed with appcrane_stage_chunk into one staged file and return its token. Hand that token to appcrane_deploy_artifact to deploy it — that pair is a complete, MCP-native deploy for an app with no repo, and it does not touch GitHub. Pass sha256 of the WHOLE original file to have the reassembled bytes verified before the token is issued; without it you are trusting that every part arrived intact.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "session": {
+          "type": "string",
+          "description": "The session id used for the parts."
+        },
+        "filename": {
+          "type": "string",
+          "description": "Name for the assembled file. For a deploy it must end in .zip, .tar.gz or .tgz."
+        },
+        "sha256": {
+          "type": "string",
+          "description": "Optional hex SHA-256 of the whole original file, verified before the token is issued."
+        }
+      },
+      "required": [
+        "session",
+        "filename"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "appcrane_rename_app",
+    "description": "Rename an app's slug. The slug is its URL, its container name and its data directory, so this changes all three — but it is NOT destructive: deploy history, env vars, ports, per-app roles and grants are keyed on the app id, not the slug, and survive untouched. The old slug is kept as a redirect unless redirect=false. Platform admin. Use this instead of recreating an app under a new name, which is what loses the history. To free a slug held by an app you no longer want, rename THAT app out of the way with redirect=false rather than deleting it — deleting clears the database rows but leaves data/apps/<slug> on disk, and the rename then refuses because the directory is still there.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "slug": {
+          "type": "string",
+          "description": "Current app slug."
+        },
+        "new_slug": {
+          "type": "string",
+          "description": "New slug: lowercase letters, digits and dashes, starting with a letter or digit."
+        },
+        "redirect": {
+          "type": "boolean",
+          "default": true,
+          "description": "Keep the old slug redirecting to the new one. Pass false when you are freeing the old slug for another app to take."
+        }
+      },
+      "required": [
+        "slug",
+        "new_slug"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "appcrane_deploy_artifact",
+    "description": "Deploy a release from an uploaded BUNDLE instead of from git. For an app with no GitHub repo, and the fallback when the repo path is unavailable — an expired service-account PAT blocks every managed-repo write, and this route does not touch GitHub at all. Two steps: (1) upload the bundle with `curl -F file=@dist.zip -H \"X-API-Key: <your dhk_mcp_ key>\" https://<host>/api/files/staged` — your MCP key IS allowed on that endpoint; it returns { token, sha256, size_bytes }. (2) Call this tool with that token. Accepts .zip, .tar.gz, .tgz, up to the staged-file limit. The release is identified by a SHA-256 AppCrane computes over the bytes, recorded as commit_hash \"sha256:<digest>\"; the tool re-hashes the staged bytes and refuses if they no longer match what was staged. Returns that digest — compare it against the one you computed locally. Deploys to sandbox unless env=production. DATA LOSS: like appcrane_deploy, this replaces the container. If the app persists paths AppCrane is not mounting, the tool refuses and names them; retry with acknowledge_data_loss=true only after the user has agreed to lose exactly those paths.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "slug": {
+          "type": "string",
+          "description": "Target app slug"
+        },
+        "stage": {
+          "type": "string",
+          "enum": [
+            "sandbox",
+            "production"
+          ],
+          "default": "sandbox",
+          "description": "Target stage (legacy alias: env)."
+        },
+        "token": {
+          "type": "string",
+          "description": "Token returned by POST /api/files/staged"
+        },
+        "commit_message": {
+          "type": "string",
+          "description": "Optional release note, shown in the deploy history"
+        },
+        "commit_sha": {
+          "type": "string",
+          "description": "Optional git SHA from the machine that BUILT the bundle. Recorded as context only — it is not verified and does not become the release identity."
+        },
+        "acknowledge_data_loss": {
+          "type": "boolean",
+          "description": "Confirms that the state at the paths named in this tool's DATA_LOSS_NOT_ACKNOWLEDGED error may be destroyed. Set it only after the error has named those paths and the user has agreed."
+        }
+      },
+      "required": [
+        "slug",
+        "token"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
     "name": "appcrane_push_staged_file",
     "description": "Move a previously-staged file into a running container at a path under /app or /data. THE WAY TO GET LARGE BINARIES (DMGs, datasets, bundles) into a container when they're too big to inline through appcrane_cp. Two steps: (1) upload the bytes with a plain multipart POST to `curl -F file=@local.dmg -H \"X-API-Key: <your dhk_mcp_ key>\" https://<host>/api/files/staged` — your MCP key IS allowed on this endpoint (v2.10.6+); it returns { token, sha256, size_bytes }. (2) Call this tool with that token and a dest path. The container must be running. Path is validated (no \"..\", must start with /app or /data). The staged blob is deleted on success.",
     "inputSchema": {
@@ -473,7 +675,7 @@
   },
   {
     "name": "appcrane_create_app",
-    "description": "Register a new app in AppCrane from a GitHub repository. Use this only after the user has explicitly confirmed they want to onboard a new app and provided a real github URL. Allocates ports, creates the data directories, configures Caddy routing, and starts health checks. After this returns, call appcrane_set_secret to set any required secrets, then appcrane_deploy to ship the first build. Requires the create-apps permission (global admins, or any role a platform admin granted at Settings → Roles).",
+    "description": "Register a new app in AppCrane, either from a GitHub repository or from a prebuilt container image. Use this only after the user has explicitly confirmed they want to onboard a new app and told you which source to use — a real github URL, or an image reference for source_type='image'. Allocates ports, creates the data directories, configures Caddy routing, and starts health checks. After this returns, call appcrane_set_secret to set any required secrets, then appcrane_deploy to ship the first build. For an image app there is nothing to build: the deploy pulls image_ref and starts it, so also pass container_port and health_path unless the image happens to match AppCrane's own 3000 + /api/health defaults. Requires the create-apps permission (global admins, or any role a platform admin granted at Settings → Roles).",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -485,14 +687,36 @@
           "type": "string",
           "description": "URL-safe identifier — lowercase letters, digits, dashes; must start with a letter or digit. Lives at /<slug>/."
         },
+        "source_type": {
+          "type": "string",
+          "enum": [
+            "github",
+            "image"
+          ],
+          "description": "'github' (default) clones and builds a repo; 'image' runs a prebuilt image and never builds. Implied when image_ref is passed."
+        },
         "github_url": {
           "type": "string",
-          "description": "GitHub repo URL, e.g. https://github.com/me/mysite"
+          "description": "GitHub repo URL, e.g. https://github.com/me/mysite. Required unless source_type is 'image'."
         },
         "branch": {
           "type": "string",
           "description": "Branch to track. Default: main",
           "default": "main"
+        },
+        "image_ref": {
+          "type": "string",
+          "description": "Prebuilt container image to run instead of building from source, e.g. \"odoo:19\" or \"ghcr.io/owner/app@sha256:<64 hex>\". Sets source_type='image'. The reference MUST name a version: a bare name (\"odoo\") and an explicit \":latest\" are both REFUSED, because AppCrane records the resolved digest as the deployment's identity and against an unpinned tag that record is wrong as soon as upstream moves. A digest is the real pin; a version tag (\"odoo:19\") is accepted and is how you pick up a patch release on redeploy. Credentials never go in the reference — a private registry authenticates through the Docker daemon's own credential store, set up out of band."
+        },
+        "container_port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535,
+          "description": "Port the image listens on inside the container. Omit only if the image really listens on 3000 (what an AppCrane-built image does); a third-party image usually does not — odoo is 8069, nginx is 80. Getting this wrong makes the app unreachable, not slow."
+        },
+        "health_path": {
+          "type": "string",
+          "description": "HTTP path AppCrane health-checks. Omit only if the image serves /api/health (the AppCrane-built default). A stock image will not, and a health check against a 404 marks a working app unhealthy."
         },
         "description": {
           "type": "string"
@@ -516,15 +740,14 @@
       },
       "required": [
         "name",
-        "slug",
-        "github_url"
+        "slug"
       ],
       "additionalProperties": false
     }
   },
   {
     "name": "appcrane_update_app",
-    "description": "Patch fields on an existing app. Use this to fix a missing github_url after the fact, change branch, rotate the github_token, retag with category/visibility, or adjust resource limits — anything you would otherwise need direct DB access for. Only includes fields you pass; omitted fields are left alone. To clear a string field pass an empty string. Returns the same shape as appcrane_get_app.",
+    "description": "Patch fields on an existing app. Use this to fix a missing github_url after the fact, change branch, rotate the github_token, retag with category/visibility, point an image app at a new image_ref, or adjust resource limits — anything you would otherwise need direct DB access for. Only includes fields you pass; omitted fields are left alone. To clear a string field pass an empty string. Returns the same shape as appcrane_get_app.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -549,7 +772,8 @@
           "enum": [
             "github",
             "managed",
-            "managed_legacy"
+            "upload",
+            "image"
           ]
         },
         "github_url": {
@@ -558,6 +782,20 @@
         },
         "branch": {
           "type": "string"
+        },
+        "image_ref": {
+          "type": "string",
+          "description": "Prebuilt container image to run instead of building from source, e.g. \"odoo:19\" or \"ghcr.io/owner/app@sha256:<64 hex>\". Sets source_type='image'. The reference MUST name a version: a bare name (\"odoo\") and an explicit \":latest\" are both REFUSED, because AppCrane records the resolved digest as the deployment's identity and against an unpinned tag that record is wrong as soon as upstream moves. A digest is the real pin; a version tag (\"odoo:19\") is accepted and is how you pick up a patch release on redeploy. Credentials never go in the reference — a private registry authenticates through the Docker daemon's own credential store, set up out of band. Pass empty string to clear."
+        },
+        "container_port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535,
+          "description": "Port the image listens on inside the container. Omit only if the image really listens on 3000 (what an AppCrane-built image does); a third-party image usually does not — odoo is 8069, nginx is 80. Getting this wrong makes the app unreachable, not slow."
+        },
+        "health_path": {
+          "type": "string",
+          "description": "HTTP path AppCrane health-checks. Omit only if the image serves /api/health (the AppCrane-built default). A stock image will not, and a health check against a 404 marks a working app unhealthy. Pass empty string to restore the default."
         },
         "github_token": {
           "type": "string",
@@ -611,7 +849,7 @@
   },
   {
     "name": "appcrane_set_app_meta",
-    "description": "Set an app's category, visibility, auth_mode, and/or auth_bypass_paths — the owner self-service fields (same controls the dashboard Launcher exposes to owners). Owner of the app (or global admin) required. visibility is one of public / private / hidden. auth_mode is `authenticated` (default — all routes go through AppCrane SSO) or `headless` (the app bypasses forward_auth ENTIRELY and is reachable without identity — right tool for telemetry ingest, public webhooks, status pages; the app's own server is responsible for any payload-level authn). auth_bypass_paths (v2.7.27+) is an array of path prefixes (e.g. [\"/ws/local-runner\"]) that bypass SSO on this app only — narrower than headless mode; the app authenticates those paths itself (e.g. token in query string). The platform strips incoming X-AppCrane-* headers on bypass paths (forgery defense intact) and suppresses access logging for them (token-in-query never sits in log storage). Owners may only assign an EXISTING category; creating a brand-new category is reserved for global admins. For powerful fields (github_url, branch, token, source_type, resource limits) use appcrane_update_app (admin only).",
+    "description": "Set an app's category, visibility, auth_mode, and/or auth_bypass_paths — the owner self-service fields (same controls the dashboard Launcher exposes to owners). Owner of the app (or global admin) required. visibility is one of public / private / hidden. auth_mode is `authenticated` (default — all routes go through AppCrane SSO) or `headless` (the app bypasses forward_auth ENTIRELY and is reachable without identity — right tool for telemetry ingest, public webhooks, status pages; the app's own server is responsible for any payload-level authn). A headless app is still served BY CADDY over HTTP — TLS, security headers and access logging all still apply; it is not a raw port. An app that does not speak HTTP at all needs ingress_type='tcp', and an app that speaks HTTP AND needs a second raw port for non-HTTP clients needs ingress_type='dual' (both via appcrane_set_app_ingress, platform admin only) — different and far more exposed things. auth_bypass_paths (v2.7.27+) is an array of path prefixes (e.g. [\"/ws/local-runner\"]) that bypass SSO on this app only — narrower than headless mode; the app authenticates those paths itself (e.g. token in query string). The platform strips incoming X-AppCrane-* headers on bypass paths (forgery defense intact) and suppresses access logging for them (token-in-query never sits in log storage). Owners may only assign an EXISTING category; creating a brand-new category is reserved for global admins. For powerful fields (github_url, branch, token, source_type, resource limits) use appcrane_update_app (admin only).",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -655,6 +893,74 @@
       },
       "required": [
         "slug"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "appcrane_get_app_ingress",
+    "description": "Read HOW an app is reachable. ingress_type is `http` (default — every request goes through Caddy: TLS, AppCrane SSO/forward_auth, X-AppCrane-* identity headers, security headers, access logs), `tcp` (the container port is published DIRECTLY on the host at public_port, with Caddy not in the path at all — for apps that do not speak HTTP, e.g. a forward/CONNECT proxy handing back a raw tunnel), or `dual` (v2.45.0 — BOTH at once: an ordinary HTTP control plane still served through Caddy on container port 3000 with every Caddy control intact, PLUS a raw data plane published at 0.0.0.0:<public_port> -> <data_plane_port>, a DIFFERENT port inside the same container, with none of them). For a dual app the two planes have different security properties and the answer to \"is this app behind AppCrane auth\" is different for each — read `exposure.control_plane` and `exposure.data_plane` rather than the enum. Read this before debugging \"why does my app see no identity headers\" or \"what port do clients connect to\". IMPORTANT — this is NOT auth_mode: auth_mode=`headless` still goes through Caddy and only skips forward_auth, so it keeps TLS, security headers and request logging; a published port under `tcp` or `dual` keeps NONE of that. Requires access to the app.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "slug": {
+          "type": "string",
+          "description": "App slug."
+        }
+      },
+      "required": [
+        "slug"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "appcrane_set_app_ingress",
+    "description": "Switch an app between HTTP ingress, raw TCP ingress and dual (both), and choose its public host port. PLATFORM ADMIN ONLY — this is not an owner self-service field like auth_mode. ingress_type=`tcp` publishes 0.0.0.0:<public_port> -> the container in ADDITION to the loopback publish every app has, so clients connect straight to the host and Caddy never sees the traffic: no forward_auth/SSO, no identity headers, no per-request audit, no rate limiting, no security headers, no TLS from AppCrane. Every control AppCrane has assumes Caddy is the only door; this adds a second one the platform does not control, and the app then owns authentication completely. Do NOT reach for this to make an app reachable without login — that is auth_mode=`headless`, which still goes through Caddy and keeps TLS, security headers and logging. Use `tcp` ONLY when the app does not speak HTTP at all (a forward/CONNECT proxy tunnels raw bytes; no reverse proxy can express that). ingress_type=`dual` (v2.45.0) is for an app that is BOTH: its HTTP control plane keeps being served through Caddy on container port 3000 with every control intact (and stays the plane its health check probes), while a SECOND listener inside the same container — data_plane_port, which is REQUIRED and must not be 3000 — is published raw at 0.0.0.0:<public_port> with none of them. Setting data_plane_port to 3000 is refused: that would republish the ordinary HTTP origin Caddy fronts, unauthenticated and unaudited, which is the exact surface Caddy is in the path to protect. Omit public_port to keep the existing allocation, or to have the lowest free port in 31000-31999 allocated — a dedicated band so the operator firewalls one predictable block; an explicitly NAMED port may be anything in 1024-65535, because clients are configured with a port by hand or by MDM and a number like 8080 is often not the platform's to choose. Naming a port outside the auto band is legal and safe — the guards that matter (the WHATWG blocked list, AppCrane's own listening port, collisions with slot-derived backend ports, and one-app-per-host-port) apply at every value — but the operator must open the firewall for that port too. Switching back to `http` STOPS THE PUBLISH but does not close the port: the publish is a `docker run` flag, so a running container keeps binding it until it is RECREATED (next deploy, or POST /api/apps/<slug>/restart/<env>, which does stop+start). Until then the port stays reachable and unauthenticated, so AppCrane keeps it RESERVED to this app — no other app can be given it, and it goes back in the pool automatically when the container comes back without the publish. Recreate the container to actually close a port, and do not report an exposure as revoked before that; the app reports the number under `pending_port_release` in the meantime. Do NOT treat the host firewall as a second lock holding this shut: on a Linux host Docker's publish is a DNAT rule evaluated in FORWARD that never traverses INPUT, so a plain `ufw deny <port>` does NOT block it — filter in DOCKER-USER or upstream. This host also sits behind SDP, so the boundary that exists is the perimeter: publishing makes the port reachable by everything inside it, not by the internet and not by nobody.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "slug": {
+          "type": "string",
+          "description": "App slug."
+        },
+        "ingress_type": {
+          "type": "string",
+          "enum": [
+            "http",
+            "tcp",
+            "dual"
+          ],
+          "description": "http = through Caddy (default). tcp = the container port is published on the host, with no AppCrane authentication in front of it. dual = both — the HTTP control plane stays behind Caddy on container port 3000, and a separate data_plane_port in the same container is published raw alongside it."
+        },
+        "public_port": {
+          "type": "integer",
+          "minimum": 1024,
+          "maximum": 65535,
+          "description": "HOST port to publish. Only valid with ingress_type='tcp' or 'dual'. Omit to keep the port the app already holds, or to have one allocated from 31000-31999; name one explicitly and it may be anything in 1024-65535, which is what makes a client fleet already pinned to e.g. 8080 expressible. A port is stored, never derived from the app's slot, so it survives redeploys and renames — clients pinned to it keep working. Two apps cannot hold the same host port."
+        },
+        "sandbox_public_port": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1024,
+          "maximum": 65535,
+          "description": "HOST port to publish for the SANDBOX container, so a raw data plane can be exercised before it goes live. Opt-in and independent of public_port — omit it and sandbox publishes nothing, exactly as before. Pass null to drop it. Must not equal any port any other app holds in EITHER environment; the registry enforces that. Only valid with ingress_type='tcp' or 'dual'. SECURITY: this is a SECOND unauthenticated door, on the container running your least-reviewed code — it has no forward_auth, no identity headers, no audit and no TLS from AppCrane, and behind SDP it is reachable by everything inside the perimeter."
+        },
+        "data_plane_port": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1024,
+          "maximum": 65535,
+          "description": "CONTAINER port the raw publish targets, 1024-65535. REQUIRED with ingress_type='dual'. On any other type the only accepted value is null, which DROPS a data plane the app still has pinned — required to flip a dual app to 'tcp', since that publishes container port 3000 instead. Must NOT be 3000: that is the app's HTTP control plane, the port Caddy proxies to, and publishing it raw would expose the ordinary HTTP origin with no TLS, no forward_auth, no identity headers and no request audit. Give the data plane its own listener on another port inside the container. Unlike public_port this is not globally unique — container network namespaces are separate, so two apps may each use the same container-side port."
+        }
+      },
+      "required": [
+        "slug",
+        "ingress_type"
       ],
       "additionalProperties": false
     }
@@ -722,6 +1028,81 @@
       "required": [
         "slug",
         "user"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "appcrane_list_app_roles",
+    "description": "List the roles an app defines FOR ITSELF (approver, auditor, reviewer — whatever that app invented). Any member sees the roles and how many hold each; an owner or admin also gets `members`, the roster of who holds what. These are NOT AppCrane permissions: they grant nothing on the platform and are only handed to the app, in the X-AppCrane-App-Roles request header and in /api/me's app_roles array, for the app's own code to enforce. For AppCrane's own per-app tier — owner/admin/user/viewer, i.e. who may deploy, read env vars, or delete the app — use appcrane_list_app_members instead. Call this before creating a role (to avoid duplicating one) or before setting a user's roles (to see the valid keys). Requires being assigned to the app.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "slug": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "slug"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "appcrane_create_app_role",
+    "description": "Define a new role for an app to enforce itself — the vocabulary side of app-defined roles. This does NOT grant AppCrane privileges of any kind, and it does NOT give anyone the role: use appcrane_set_user_app_roles for that. To change who may deploy / read env / delete, you want appcrane_grant_app_access, not this tool. key is what the app's code compares against and is immutable once created; it must match /^[a-z][a-z0-9_-]{0,31}$/ and may not be one of the AppCrane-reserved words (owner, admin, user, viewer, none, platform_admin). label is the human name shown in the dashboard. An app may define at most 16 roles. Owner or admin of the app required.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "slug": {
+          "type": "string"
+        },
+        "key": {
+          "type": "string",
+          "description": "Machine key the app matches on, e.g. \"approver\". Lowercase, immutable."
+        },
+        "label": {
+          "type": "string",
+          "description": "Human-readable name, e.g. \"Budget approver\""
+        },
+        "description": {
+          "type": "string",
+          "description": "Optional. What the app lets this role do."
+        }
+      },
+      "required": [
+        "slug",
+        "key",
+        "label"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "appcrane_set_user_app_roles",
+    "description": "Set which app-defined roles a user holds on one app. Replaces their whole set: keys omitted from the list are removed, and keys: [] clears every role they hold. This changes only what the app itself enforces — it does NOT change the user's AppCrane per-app tier, so it can neither grant nor remove deploy / env / delete power. Use appcrane_grant_app_access for that. Every key must already be defined on this app (appcrane_create_app_role) and the user must already have access to the app (appcrane_grant_app_access) — a role on a non-member is unenforceable, since the app never sees them. The result is what the app receives in X-AppCrane-App-Roles on the user's next request. Owner or admin of the app required.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "slug": {
+          "type": "string"
+        },
+        "user": {
+          "type": "string",
+          "description": "User id (numeric string), email, or username"
+        },
+        "keys": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The COMPLETE set of app-defined role keys this user should hold. [] removes all of them."
+        }
+      },
+      "required": [
+        "slug",
+        "user",
+        "keys"
       ],
       "additionalProperties": false
     }
@@ -943,6 +1324,136 @@
     }
   },
   {
+    "name": "appcrane_managed_push_chunk",
+    "description": "Stage ONE part of a large file for a managed app, entirely over MCP (no HTTP upload). Use this + appcrane_managed_assemble when a file is too large to emit reliably inline via appcrane_push_to_managed_app (roughly >64 KB of code). Workflow: pick an opaque `session` id (any unique string, e.g. \"app.tsx-1\"), split the file into N parts, and call this once per part with part=1..N and of=N. The parts are held server-side keyed by (session, part); appcrane_managed_assemble then concatenates them in order, verifies the whole, and commits. Split on any boundary you like (byte or line) — assemble concatenates the decoded bytes verbatim, so the split points do not need to be newlines. Keep each part small (≤ ~48 KB of content) so inline emission stays reliable. encoding defaults to \"utf-8\"; use \"base64\" for binary. If you provide `sha256` (hex SHA-256 of THIS part's decoded bytes), the server verifies it on arrival and rejects a corrupted part immediately. Re-sending the same (session, part) overwrites it, so a failed part is safe to retry.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "slug": {
+          "type": "string",
+          "description": "Managed app slug (repo AMC_<slug>)."
+        },
+        "path": {
+          "type": "string",
+          "description": "Repo-relative destination path (no leading slash, no \"..\"). Must be identical across every part of a session."
+        },
+        "session": {
+          "type": "string",
+          "description": "Opaque upload id grouping the parts. Any unique string; reuse the same value for every part of one file."
+        },
+        "part": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "1-based part number."
+        },
+        "of": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Total number of parts. Must be identical across every part of a session."
+        },
+        "content": {
+          "type": "string",
+          "description": "This part's bytes, encoded per `encoding`."
+        },
+        "encoding": {
+          "type": "string",
+          "enum": [
+            "utf-8",
+            "base64"
+          ],
+          "description": "Defaults to utf-8. Use base64 for binary files."
+        },
+        "sha256": {
+          "type": "string",
+          "description": "Optional hex SHA-256 of this part's decoded bytes. If given, the server verifies it and rejects a mismatch."
+        }
+      },
+      "required": [
+        "slug",
+        "path",
+        "session",
+        "part",
+        "of",
+        "content"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "appcrane_managed_assemble",
+    "description": "Finish a chunked upload started with appcrane_managed_push_chunk: concatenate all parts of a `session` in order, verify the whole, and commit the assembled file to the managed app's AMC_<slug> repo as a single commit. Fails if any part is missing. If you pass `sha256` (hex SHA-256 of the ENTIRE original file's bytes), the server verifies the reassembled bytes against it and refuses to commit on mismatch — always pass it for large or binary files. On success the staged parts are deleted. Returns the commit sha plus the committed file's sha256 and byte length.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "slug": {
+          "type": "string",
+          "description": "Managed app slug (repo AMC_<slug>)."
+        },
+        "session": {
+          "type": "string",
+          "description": "The upload id you used for appcrane_managed_push_chunk."
+        },
+        "path": {
+          "type": "string",
+          "description": "The destination path; must match what the parts were staged with."
+        },
+        "sha256": {
+          "type": "string",
+          "description": "Optional hex SHA-256 of the whole original file. If given, the reassembled bytes are verified against it before committing."
+        },
+        "message": {
+          "type": "string",
+          "description": "Commit message. Defaults to \"chore: update <path>\"."
+        },
+        "branch": {
+          "type": "string",
+          "description": "Target branch. Defaults to the app's branch / repo default."
+        }
+      },
+      "required": [
+        "slug",
+        "session",
+        "path"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "appcrane_managed_patch",
+    "description": "Edit an existing text file in a managed app's AMC_<slug> repo by applying a unified diff, entirely over MCP — you emit only the changed hunks, not the whole file. Ideal for small edits to a large file (avoids re-emitting the whole thing, which is where inline truncation comes from). The server fetches the current file, applies your `unified_diff`, and commits the result as a single commit. The diff must be a standard unified diff (as from `git diff` / `diff -u`): `@@ -old,len +new,len @@` hunk headers, lines prefixed with \" \" (context), \"-\" (remove), \"+\" (add). Include a few context lines around each change. Hunks are matched by CONTENT (not just line numbers), so small line drift is tolerated — but if a hunk's context does not match the current file, the whole patch is rejected and nothing is committed (re-read the file and regenerate the diff). Only single-file diffs are supported; the target is `path`, not the diff's ---/+++ headers.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "slug": {
+          "type": "string",
+          "description": "Managed app slug (repo AMC_<slug>)."
+        },
+        "path": {
+          "type": "string",
+          "description": "Repo-relative path of the file to patch (no leading slash, no \"..\")."
+        },
+        "unified_diff": {
+          "type": "string",
+          "description": "A standard unified diff to apply to the current contents of `path`."
+        },
+        "message": {
+          "type": "string",
+          "description": "Commit message. Defaults to \"chore: patch <path>\"."
+        },
+        "branch": {
+          "type": "string",
+          "description": "Target branch. Defaults to the app's branch / repo default."
+        }
+      },
+      "required": [
+        "slug",
+        "path",
+        "unified_diff"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
     "name": "appcrane_set_secret",
     "description": "Set or update a secret (an encrypted environment variable injected into the app). Encrypted at rest; only the running app process can read the plaintext. Defaults to sandbox; require explicit stage=\"production\" only when the user asks. App-admin or AppCrane admin only. Respects the caller's mcp_app_scope.",
     "inputSchema": {
@@ -1072,6 +1583,199 @@
       "required": [
         "slug",
         "name"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "appcrane_check_resource_limits",
+    "description": "Which containers are NOT running with the CPU/RAM limits AppCrane has configured for them? Compares every app row against the limits actually in force on its container and reports only the mismatches. `--memory` and `--cpus` are `docker run` flags, so changing a limit rewrites the database and nothing else until the container is RECREATED — a container created before the limit was set keeps running without it, and every other AppCrane surface reports the CONFIGURED number, so the two are indistinguishable without this. `memory state=not_applied` means NO limit at all: that container can take the whole host, and on a host with no swap that ends as a global OOM kill of whatever the kernel judges largest. Answers `applied: null` (unknown) rather than guessing when Docker cannot be read. ADMIN ONLY.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "slug": {
+          "type": "string",
+          "description": "Check one app instead of the whole fleet."
+        },
+        "include_ok": {
+          "type": "boolean",
+          "default": false,
+          "description": "Also list containers whose limits ARE applied. Default false — the point is the exceptions."
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "appcrane_get_backup_status",
+    "description": "Is off-site backup actually working? Reports the scheduled S3/R2 backup config together with a verdict — `configured`, `enabled`, `healthy`, when it last ran and what is missing — so \"are we backed up\" is one call rather than an inference from raw settings. The backup covers the SQLite database (apps, users, settings, encrypted env vars), .env, icons and appdata, uploaded nightly as one zip. NEVER returns the secret access key; `has_secret` reports only whether one is stored. Read the `summary` first: a config can be fully populated and still not be running (enabled=false), and it can be enabled and failing every night (see last_error). PLATFORM ADMIN ONLY.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "appcrane_set_backup_config",
+    "description": "Configure the scheduled off-site (S3 / S3-compatible, e.g. Cloudflare R2) backup. Every field is optional — only what you pass is changed. Enabling is REFUSED unless bucket, access_key_id and a stored secret are all present, because an enabled-but-unconfigured backup fails silently every night while every status surface reads \"enabled\", which is worse than being plainly off. SECURITY: `secret_access_key` is write-only — AppCrane encrypts it and never returns it — but passing it here means the plaintext value travels through this conversation and whatever logs it. Prefer Settings → Backup in the dashboard for the secret itself, and use this tool for the rest. PLATFORM ADMIN ONLY: this names the destination a copy of every secret on the platform is written to, so pointing it at the wrong bucket is an exfiltration path, not a misconfiguration.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Turn the nightly schedule on or off. Refused with enabled=true unless bucket, access_key_id and a stored secret all exist."
+        },
+        "bucket": {
+          "type": "string",
+          "description": "Destination bucket name."
+        },
+        "region": {
+          "type": "string",
+          "description": "Region, e.g. us-east-1. Defaults to us-east-1."
+        },
+        "prefix": {
+          "type": "string",
+          "description": "Key prefix inside the bucket, e.g. \"appcrane/\". Optional."
+        },
+        "endpoint": {
+          "type": "string",
+          "description": "Custom S3 endpoint for a non-AWS provider (Cloudflare R2, MinIO). Leave empty for AWS."
+        },
+        "access_key_id": {
+          "type": "string",
+          "description": "Access key id. Not a secret on its own; stored in the clear."
+        },
+        "secret_access_key": {
+          "type": "string",
+          "description": "Secret access key. Write-only: encrypted at rest, never returned by any read surface. NOTE: passing it here puts the plaintext in this conversation — the dashboard is the better place for it."
+        },
+        "hour": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 23,
+          "description": "Hour of day (server local time) to run. Default 3."
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "appcrane_run_backup_now",
+    "description": "Run the off-site backup immediately and report what was uploaded. Use this to PROVE a new configuration works instead of waiting for the nightly run to fail quietly — it exercises the real credentials, the real bucket and the real upload path, and records the result in last_run / last_error exactly as the scheduled job does. Works whether or not the schedule is enabled, so a configuration can be verified before turning it on. Uploads a zip of the SQLite database, .env, icons and appdata. PLATFORM ADMIN ONLY.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "appcrane_memory_budget",
+    "description": "Does the sum of every app's CONFIGURED memory ceiling fit in this host's RAM? Adds up the per-container `--memory` limits AppCrane has on file and compares the total against total host memory. THESE ARE CONFIGURED CEILINGS, NOT MEASURED USAGE: a report of \"25 GB committed on a 7.6 GB host\" does NOT mean the host is using 25 GB, and must never be relayed as one — it means the limits promise more than the host can deliver if the containers ever ask for it at once. Nothing here reads a running container; for what is actually in force on the containers use appcrane_check_resource_limits, and for live consumption read the host. Over-commitment is normal and is not by itself a fault (containers idle far below their ceilings) — it matters because it means there is no headroom guarantee, so a correlated event such as a post-reboot cold start, when every container loads at once, is resolved by the kernel's global OOM killer. Counts both stages of every app, which is exactly what a cold start brings up. ADMIN ONLY.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "appcrane_scan_report",
+    "description": "Which hosted apps have known-vulnerable dependencies? Reports the recorded CVE scan state for the whole fleet, or for one app with `slug`. REPORT ONLY: this scan has never blocked a deploy and cannot — the apps belong to other teams who did not choose the control, so findings are recorded and mailed and the deploy proceeds either way. Never relay a finding as a deploy failure. READ `status` BEFORE READING COUNTS. It is four-valued: `ok` (scanned, nothing found) and `findings` (scanned, something found) are results; `skipped` (no lockfile AppCrane can read) and `error` (OSV unreachable, unparseable lockfile) mean the app was NOT SCANNED, as does having no scan row at all. Those two carry no findings for the same reason an unopened box is empty, and an agent that reports such an app as clean has stated the opposite of what is known — \"no vulnerabilities found\" is only ever true of an app whose status is `ok`. `assurance` (none / partial / complete), `unscanned_count` and `unscanned_by_status` say how much of the fleet the numbers actually cover; read them before the findings. EVERY FINDING CARRIES `ecosystem` AND `fixed` beside `name`, `version` and `ids`. `fixed` is the version that resolves those advisories, or null when OSV PUBLISHED NO FIXED VERSION — a null means there is nothing to upgrade to yet, NEVER that no fix is needed and never that AppCrane did not look, so a null-`fixed` finding is not a harmless one. `manifests_scanned` says WHICH manifests were actually read, because coverage is per manifest and not per app: one scan row reads ONE manifest — the ecosystem named on it — so an app whose Go service was never read appears here beside its scanned npm frontend with an empty findings list, and that emptiness is evidence about the frontend only. Scans run at deploy AND daily, and the daily run is the one that matters, because it catches an advisory published against code that was already deployed and has not changed since. ADMIN ONLY.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "slug": {
+          "type": "string",
+          "description": "Report one app (both stages) instead of the whole fleet."
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "appcrane_scan_app",
+    "description": "Scan one app's dependencies against OSV right now and record the result, instead of waiting for its next deploy or the nightly run. Use it after fixing a lockfile to confirm a finding is gone, or on an app whose last result was `skipped` or `error` to find out what it actually contains. REPORT ONLY — it records a row and feeds the daily digest; it never blocks, fails or rolls back anything, and running it cannot disturb the app. It does not throw on a failed scan either: an unreachable OSV or a missing lockfile comes back as `ok: false` with status `error` or `skipped`, meaning the app was NOT scanned and is NOT known to be clean. `ok: true` with status `findings` is the opposite case — the scan worked and found something. Reads the LIVE release through the same `current` symlink the running container was built from. Defaults to the PRODUCTION stage: most AppCrane tools default to sandbox, but the code an advisory applies to is the code that is serving. ADMIN ONLY.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "slug": {
+          "type": "string",
+          "description": "App to scan."
+        },
+        "stage": {
+          "type": "string",
+          "enum": [
+            "sandbox",
+            "production"
+          ],
+          "default": "production",
+          "description": "Stage to scan. Defaults to production — that is the deployed code an advisory applies to. Target stage (legacy alias: env)."
+        }
+      },
+      "required": [
+        "slug"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "appcrane_platform_policy",
+    "description": "Read or set the two platform-wide policy levers, and list the apps currently in violation. `ban_public_apps` refuses visibility=public on every write path; `mandate_security_scans` reports every app without a completed scan in the last 48h. Both default OFF, so an upgrade enforces nothing until an admin turns one on. Call with no arguments to read the current policy plus violations; pass either boolean to change it. POLICY IS NOT RETROACTIVE: turning a lever on refuses the NEXT write and REPORTS what is already in violation — it does not reach into the database and change existing apps, and the violations it lists keep working exactly as they did. That is deliberate: silently making live public apps private would break their URLs with no warning to their owners and no record of what changed, so the list exists for an admin to work through deliberately. Never describe enabling a lever as having fixed the apps it reports; nothing about them has changed. PLATFORM ADMIN ONLY.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "ban_public_apps": {
+          "type": "boolean",
+          "description": "Refuse visibility=public everywhere. Existing public apps keep serving and are reported as violations."
+        },
+        "mandate_security_scans": {
+          "type": "boolean",
+          "description": "Report every app with no completed dependency scan in the last 48h (two missed daily runs)."
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "appcrane_provision_database",
+    "description": "Create a real managed database for an app: one dedicated database plus its own login inside the platform's shared Postgres or MariaDB server. Reach for this when an app 503s, restarts in a loop, or logs a connection error against a database nobody ever created — most catalogue apps (BookStack, Ghost, Akaunting, Gitea and ~50 more) ship no database of their own and cannot boot without one. THIS CREATES REAL INFRASTRUCTURE: it starts the shared engine container if it is not already running, then creates a database and a login role that exist until somebody deletes them. Idempotent per app+engine — a second call returns the existing database rather than making another, and never rotates the password out from under a running container — so retrying after a timeout is safe. IT DOES NOT RETURN THE PASSWORD, and no AppCrane tool does. The credential is generated server-side, stored encrypted, and injected into the container's environment AT DEPLOY TIME under the variable names that app's own image reads. Do not ask for it, do not try to reconstruct it, and do not tell the user to paste it anywhere — no supported workflow needs a human or an agent to hold it. WHAT THIS DOES NOT DO: it does not restart or redeploy the app, so a container that is already running sees nothing change — call appcrane_deploy afterwards or the app will keep failing in exactly the same way. It does not create or migrate a schema; the app does that on its first successful boot. It does not delete anything, and deprovisioning is deliberately absent from the MCP surface — dropping a database is unrecoverable data loss and belongs to a human in the dashboard, not to an agent recovering from a 503. You must name the engine: pass the one the image documents (BookStack and most linuxserver.io images want mariadb; Postgres-native apps want postgres). Guessing wrong is not destructive but does not help either — it leaves an unused empty database and the app keeps 503ing. An app may hold one of each. ACCESS: requires an app-user assignment on that app, the same tier as env vars and backups. Being an AppCrane admin is NOT enough on its own — assign yourself with appcrane_grant_app_access first, which is the audited step the dashboard also requires.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "slug": {
+          "type": "string",
+          "description": "App slug the database belongs to, e.g. \"bookstack\"."
+        },
+        "engine": {
+          "type": "string",
+          "enum": [
+            "postgres",
+            "mariadb",
+            "mongo",
+            "redis"
+          ],
+          "description": "Which shared engine to create the database in. Required — an app may hold one of each, and this is not guessed for you."
+        }
+      },
+      "required": [
+        "slug",
+        "engine"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "appcrane_list_databases",
+    "description": "What managed databases an app already has: engine, database name, login name and when it was created. Call it before appcrane_provision_database so you do not ask for something that exists, and when debugging a database-related failure to settle which fault you are looking at — \"this app has no database\" and \"this app has a database it cannot reach\" are different problems with different fixes, and they look identical from the app's error message. AN EMPTY LIST IS AN ANSWER, NOT AN ERROR: it means no managed database has been provisioned, which is the correct and expected state for an app that brings its own database or needs none. Do not read it as a failure. NEVER returns a password, a connection URL, a host or a port — no AppCrane surface hands the credential out, because the deployer injects it into the container environment and nothing asks a human or an agent to hold it. What is here is identity, not access. It reports what AppCrane has on file; it does not connect to the engine, so it cannot tell you whether the server is up or whether the app's own connection is working. ACCESS: requires access to the app.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "slug": {
+          "type": "string",
+          "description": "App slug, e.g. \"bookstack\"."
+        }
+      },
+      "required": [
+        "slug"
       ],
       "additionalProperties": false
     }

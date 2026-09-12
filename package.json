@@ -1,14 +1,18 @@
 {
   "name": "appcrane-mcp",
-  "version": "1.0.0",
-  "description": "Standalone MCP connector for AppCrane — the self-hosted deployment platform for AI-built apps. Serves the appcrane_* tool catalog for offline introspection and proxies real tool calls to your AppCrane instance.",
+  "version": "1.1.0",
+  "mcpName": "io.github.gitayg/appcrane",
+  "description": "Standalone MCP connector for AppCrane \u2014 the self-hosted deployment platform for AI-built apps. Serves the appcrane_* tool catalog for offline introspection and proxies real tool calls to your AppCrane instance.",
   "type": "module",
   "license": "MIT",
   "author": "AppCrane",
   "homepage": "https://glick.run/appcrane.html",
   "repository": {
     "type": "git",
-    "url": "https://github.com/gitayg/appCrane.git"
+    "url": "git+https://github.com/gitayg/appcrane-mcp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/gitayg/appcrane-mcp/issues"
   },
   "keywords": [
     "mcp",
@@ -30,7 +34,8 @@
   "scripts": {
     "build": "tsc",
     "gen:catalog": "node scripts/gen-catalog.mjs",
-    "prepublishOnly": "npm run build",
+    "check:catalog": "node scripts/gen-catalog.mjs --check",
+    "prepublishOnly": "npm run check:catalog && npm run build",
     "start": "node dist/index.js"
   },
   "engines": {

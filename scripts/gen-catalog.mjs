@@ -6,22 +6,27 @@
 // Source of truth: the real MCP tool definitions in the AppCrane platform:
 //   deployhub/server/services/mcpTools.js
 //
-// That module can't be imported directly here — its top-level imports pull in
-// the database, encryption, permissions, etc. So we extract just the two pieces
-// we need — the `TOOLS = [...]` array literal and the `stageifySchema` helper —
-// and evaluate them inside a vm sandbox with a forgiving global. The handler
-// functions in TOOLS are never called (we only read name/description/schema),
-// so their free references to db/getDb/etc. never resolve, which is fine.
+// We import that module and call its own getToolCatalog(), so the bundled
+// catalog is byte-for-byte what the live server advertises. Importing is safe:
+// db.js only assigns its singleton inside initDb(), and getDb() throws until
+// then, so nothing here opens a database, runs a migration, or touches DATA_DIR.
 //
-// We reproduce exactly what getToolCatalog() advertises: each tool's
-// { name, description, inputSchema } after applying stageifySchema
-// (the AWS-aligned env -> stage rename). The set_secret/get_secret/cp names are
-// already baked into the TOOLS array literal, so no name transform is needed.
+// This used to extract the `TOOLS = [...]` array literal by bracket-walking the
+// source text and evaluating it in a vm sandbox whose global returned undefined
+// for every free identifier. That broke the moment a tool description
+// interpolated an imported constant at literal-evaluation time —
+// `${RESERVED_KEYS.join(', ')}` in appcrane_create_app_role crashed the
+// generator with "Cannot read properties of undefined (reading 'join')" — and
+// it silently reimplemented getToolCatalog()'s field mapping, so the two could
+// drift. Neither failure mode exists once the module is simply imported.
+//
+// Only { name, description, inputSchema } is written out: getToolCatalog() also
+// returns requiredRole/readOnly for the admin /mcp page, which are not part of
+// an MCP tools/list entry.
 
 import { readFileSync, writeFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
-import vm from 'node:vm';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -31,94 +36,30 @@ const SRC =
   process.env.APPCRANE_SRC ||
   resolve(__dirname, '../../deployhub/server/services/mcpTools.js');
 
-const source = readFileSync(SRC, 'utf8');
-
-// --- Extract the `const TOOLS = [ ... ];` array literal -------------------
-const toolsStart = source.indexOf('const TOOLS = [');
-if (toolsStart === -1) throw new Error('Could not find `const TOOLS = [` in ' + SRC);
-// Walk brackets from the opening `[` to find the matching close.
-const openBracket = source.indexOf('[', toolsStart);
-let depth = 0;
-let i = openBracket;
-for (; i < source.length; i++) {
-  const c = source[i];
-  if (c === '[') depth++;
-  else if (c === ']') {
-    depth--;
-    if (depth === 0) break;
-  }
+let mcpTools;
+try {
+  mcpTools = await import(pathToFileURL(SRC).href);
+} catch (err) {
+  // Almost always a missing checkout or an uninstalled deployhub node_modules —
+  // say so, rather than leaving the maintainer with a bare MODULE_NOT_FOUND.
+  throw new Error(
+    `Could not import ${SRC}: ${err.message}\n` +
+      'Set APPCRANE_SRC to the mcpTools.js of your deployhub checkout, and make ' +
+      'sure `npm install` has been run there.'
+  );
 }
-if (depth !== 0) throw new Error('Unbalanced brackets while extracting TOOLS array');
-const toolsLiteral = source.slice(openBracket, i + 1);
 
-// --- Extract the `function stageifySchema(schema) { ... }` helper ---------
-const stageStart = source.indexOf('function stageifySchema');
-if (stageStart === -1) throw new Error('Could not find stageifySchema in ' + SRC);
-// Find the body braces.
-const stageBraceOpen = source.indexOf('{', stageStart);
-depth = 0;
-let j = stageBraceOpen;
-for (; j < source.length; j++) {
-  const c = source[j];
-  if (c === '{') depth++;
-  else if (c === '}') {
-    depth--;
-    if (depth === 0) break;
-  }
+if (typeof mcpTools.getToolCatalog !== 'function') {
+  throw new Error(`${SRC} does not export getToolCatalog()`);
 }
-const stageifySrc = source.slice(stageStart, j + 1);
 
-// --- Evaluate in a vm sandbox --------------------------------------------
-// The forgiving global returns undefined for any free identifier referenced at
-// evaluation time. Handler bodies are not executed, so their references are
-// never touched; only the object literals (name/description/inputSchema) are
-// built, and those are plain data.
-// Wrap a plain backing object in a proxy that claims every identifier is in
-// scope (returning undefined for unknown ones) so free references inside
-// handler bodies never throw ReferenceError at eval time. `vm.createContext`
-// installs the standard globals (Object, Array, JSON, Promise, ...) on the
-// backing object, so real built-ins still resolve normally.
-// Seed the backing object with the host's standard built-ins so evaluated code
-// can use Object/Array/JSON/Promise/etc., then wrap it in a proxy that claims
-// every *other* identifier is in scope (returning undefined) so free references
-// inside handler bodies never throw ReferenceError at eval time.
-const backing = {
-  Object, Array, JSON, Promise, String, Number, Boolean, Math, Date,
-  RegExp, Map, Set, Error, Symbol, console, globalThis: undefined,
-};
-const proxy = new Proxy(backing, {
-  has: () => true, // claim every name is in scope → no ReferenceError
-  get: (t, k) => (k in t ? Reflect.get(t, k) : undefined),
-  set: (t, k, v) => Reflect.set(t, k, v),
-});
-backing.globalThis = proxy;
-const context = vm.createContext(proxy);
-
-// Handler bodies are never executed here, but they must still *parse* as
-// classic (non-module) script for vm.Script. Neutralize module-only syntax that
-// only appears inside handlers: `import.meta` and dynamic `import(...)`.
-const neutralize = (s) =>
-  s
-    .replace(/import\.meta/g, '({})')
-    .replace(/\bawait\s+import\s*\(/g, 'Promise.resolve(')
-    .replace(/\bimport\s*\(/g, 'Promise.resolve(');
-
-const script = `
-${neutralize(stageifySrc)}
-const TOOLS = ${neutralize(toolsLiteral)};
-globalThis.__catalog = TOOLS.map((t) => ({
+const catalog = mcpTools.getToolCatalog().map((t) => ({
   name: t.name,
   description: t.description,
-  inputSchema: stageifySchema(t.inputSchema),
+  inputSchema: t.inputSchema,
 }));
-`;
 
-vm.runInContext(script, context, { filename: 'mcpTools-extract.js' });
-const catalog = backing.__catalog;
-
-if (!Array.isArray(catalog) || catalog.length === 0) {
-  throw new Error('Extraction produced an empty catalog');
-}
+if (catalog.length === 0) throw new Error('getToolCatalog() returned an empty catalog');
 
 // Sanity checks: AWS-aligned vocabulary must be present.
 const names = catalog.map((t) => t.name);
@@ -136,8 +77,41 @@ const hasStage = catalog.some(
 );
 if (!hasStage) throw new Error('No tool advertises a `stage` param — stageifySchema did not apply');
 
+// A duplicate name would make one of the two tools unreachable through the
+// bundled catalog, and the platform would still start — so catch it here.
+const dupes = names.filter((n, idx) => names.indexOf(n) !== idx);
+if (dupes.length) throw new Error(`Duplicate tool name(s) in catalog: ${[...new Set(dupes)].join(', ')}`);
+
 const out = join(__dirname, '..', 'catalog.json');
-writeFileSync(out, JSON.stringify(catalog, null, 2) + '\n');
+const rendered = JSON.stringify(catalog, null, 2) + '\n';
+
+// --check compares instead of writing, so CI (or a pre-release step) can fail on
+// drift. Nothing ever triggered a regeneration, and the committed catalog
+// silently fell 22 tools behind the platform (35 advertised against 57 real).
+// A guard that reads catalog.json and compares it to *itself* cannot see that;
+// the comparison has to be against the platform's own getToolCatalog().
+if (process.argv.includes('--check')) {
+  const current = readFileSync(out, 'utf8');
+  if (current === rendered) {
+    console.log(`catalog.json is up to date (${catalog.length} tools).`);
+    process.exit(0);
+  }
+  const have = JSON.parse(current).map((t) => t.name);
+  const missing = names.filter((n) => !have.includes(n));
+  const stale = have.filter((n) => !names.includes(n));
+  console.error(
+    `catalog.json is STALE: it has ${have.length} tools, the platform defines ${catalog.length}.`
+  );
+  if (missing.length) console.error(`  missing (${missing.length}): ${missing.join(', ')}`);
+  if (stale.length) console.error(`  no longer real (${stale.length}): ${stale.join(', ')}`);
+  if (!missing.length && !stale.length) {
+    console.error('  same tool names, but a description or inputSchema changed.');
+  }
+  console.error('Run `npm run gen:catalog` and commit the result.');
+  process.exit(1);
+}
+
+writeFileSync(out, rendered);
 
 console.log(`Wrote ${catalog.length} tools to ${out}`);
 console.log('Sample:', names.slice(0, 8).join(', '));

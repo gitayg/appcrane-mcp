@@ -9,13 +9,28 @@ AppCrane exposes an MCP server at `<instance>/api/mcp` that requires an `X-API-K
 
 It runs anywhere Node 20+ is available, via `npx appcrane-mcp`.
 
+> **Licensing:** this connector is **MIT**. The AppCrane platform it talks to is a separate
+> project and is **AGPL-3.0**. Installing this package does not pull the platform in — the
+> connector is a client that talks to an AppCrane instance you host yourself.
+
+## How you connect
+
+There is no hosted service and no AppCrane account. The flow is entirely your own:
+
+1. You self-host AppCrane (AGPL) somewhere you control.
+2. You issue an API key from that instance.
+3. Your agent runs this connector locally over **stdio** (`npx -y appcrane-mcp`).
+4. The connector forwards each `tools/call` to `${APPCRANE_URL}/api/mcp` with your
+   `X-API-Key`. Your key stays in your own MCP client config; it is never sent anywhere
+   except the instance URL you set.
+
 ## Install / run
 
 ```bash
 npx appcrane-mcp
 ```
 
-With no environment variables it still starts and answers `tools/list` from the bundled catalog (~35 tools). To actually invoke tools against your instance, set:
+With no environment variables it still starts and answers `tools/list` from the bundled catalog (57 tools). To actually invoke tools against your instance, set:
 
 | Env var | Required | Description |
 | --- | --- | --- |
@@ -80,8 +95,17 @@ docker run -i --rm \
 npm install
 npm run build          # tsc -> dist/
 npm run gen:catalog    # regenerate catalog.json from the AppCrane platform source
+npm run check:catalog  # fail if catalog.json has drifted from that source
 node scripts/test-list.mjs   # smoke test: spawn over stdio, assert tools/list
 ```
+
+Both catalog scripts import the platform's own `getToolCatalog()` from a sibling
+`deployhub` checkout; set `APPCRANE_SRC` to point at its `server/services/mcpTools.js`
+if yours lives elsewhere.
+
+**Run `npm run check:catalog` before every release.** Nothing regenerates the catalog
+automatically and the two repos share no CI, so it rots silently — it has already been
+caught 22 tools behind the platform (35 advertised against 57 real).
 
 The bundled `catalog.json` is generated from the real tool definitions in the AppCrane platform (`deployhub/server/services/mcpTools.js`) and reflects the AWS-aligned tool vocabulary (`appcrane_set_secret`, `appcrane_get_secret`, `appcrane_cp`, and the `stage` parameter). It is committed so the package ships self-contained.
 
@@ -89,5 +113,6 @@ The bundled `catalog.json` is generated from the real tool definitions in the Ap
 
 AppCrane is a self-hosted home for AI-built and AI-deployed apps. This connector is MIT-licensed to maximize adoption; the platform itself is AGPL.
 
-- Platform: https://github.com/gitayg/appCrane
+- This connector (MIT): https://github.com/gitayg/appcrane-mcp
+- Platform (AGPL-3.0): https://github.com/gitayg/appCrane
 - Product page: https://glick.run/appcrane.html
