@@ -3,7 +3,7 @@
   "name": "io.github.gitayg/appcrane",
   "title": "AppCrane",
   "description": "Deploy and manage apps on your own AppCrane instance, the self-hosted PaaS for AI-built apps.",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "websiteUrl": "https://glick.run/appcrane.html",
   "repository": {
     "url": "https://github.com/gitayg/appcrane-mcp",
@@ -14,7 +14,7 @@
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "appcrane-mcp",
-      "version": "1.1.0",
+      "version": "1.1.1",
       "transport": {
         "type": "stdio"
       },
