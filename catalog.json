@@ -219,7 +219,7 @@
   },
   {
     "name": "appcrane_rollback",
-    "description": "Roll an env back to a prior release. Pass deployment_id (from appcrane_list_releases) to target a specific release, or omit it to roll back to the immediately previous one. Re-runs that release from its recorded build (re-uses the cached per-commit image — no rebuild when it is still retained) and health-checks it. Records a NEW deployment and marks the previous live one rolled_back. Owner-only (or global admin).",
+    "description": "Roll an env back to a prior release. Pass deployment_id (from appcrane_list_releases) to target a specific release, or omit it to roll back to the immediately previous one. Re-runs that release from its recorded build and health-checks it. A rollback to the IMMEDIATELY PREVIOUS release restarts the cached per-commit image without rebuilding, because image_retention defaults to 1 (the running image plus the one behind it); rolling back further, or on an app whose image_retention is 0, rebuilds that commit first. Records a NEW deployment and marks the previous live one rolled_back. Owner-only (or global admin).",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -819,7 +819,8 @@
         "image_retention": {
           "type": "integer",
           "minimum": 0,
-          "maximum": 50
+          "maximum": 50,
+          "description": "How many PREVIOUS per-commit images to keep per environment, on top of the running one. Default 1: the previous release's image stays on disk, so rolling back to it restarts instead of rebuilding. Raise it to make older rollback targets fast too (each extra image costs roughly the app's own layers, tens of kB when only source changed between deploys, tens of MB when dependencies did). 0 keeps only the running image and makes every rollback rebuild."
         },
         "frame_ancestors": {
           "type": "string"
@@ -1265,7 +1266,7 @@
   },
   {
     "name": "appcrane_push_to_managed_app",
-    "description": "Push a batch of files to a managed app's AMC_<slug> repo, authenticated server-side via AppCrane's service-account credential. Use this — NOT github_push_files — for managed apps, because github_* tools authenticate with the caller's personal PAT, which has zero access to the service account's repos. Multiple files become a single commit. files: [{ path, content, encoding? }] where encoding defaults to \"utf-8\" (use \"base64\" for binaries like icons). Requires the app to already exist via appcrane_create_managed_app. v2.7.22: response now includes per-file `sha256` (hex) and decoded `bytes` length so you can verify integrity — compute the SHA-256 of the bytes you sent, compare to the server's echo, and fail loudly if they differ. Essential for binary files where inline-string truncation or trailing-byte issues would otherwise produce a silently-broken commit. v2.10.7: for a large CODE file, do NOT inline it — upload the bytes over HTTP and commit by token. (1) `curl -F file=@big.js -H \"X-API-Key: <your dhk_mcp_ key>\" https://<host>/api/files/staged` returns { token, sha256, size_bytes }. (2) Pass that file as { path, staged_token } instead of { path, content }. The server reads the staged bytes and commits them verbatim, so 100+ KB sources push reliably without the model having to emit the content (which is where inline truncation comes from). Per file, provide exactly one of content or staged_token. Staged tokens are owner-scoped and expiring.",
+    "description": "Push a batch of files to a managed app's AMC_<slug> repo, authenticated server-side via AppCrane's service-account credential. Use this — NOT github_push_files — for managed apps, because github_* tools authenticate with the caller's personal PAT, which has zero access to the service account's repos. Multiple files become a single commit. files: [{ path, content, encoding? }] where encoding defaults to \"utf-8\" (use \"base64\" for binaries like icons). Requires the app to already exist via appcrane_create_managed_app. v2.7.22: response now includes per-file `sha256` (hex) and decoded `bytes` length so you can verify integrity — compute the SHA-256 of the bytes you sent, compare to the server's echo, and fail loudly if they differ. Essential for binary files where inline-string truncation or trailing-byte issues would otherwise produce a silently-broken commit. v2.10.7: for a large CODE file, do NOT inline it — upload the bytes over HTTP and commit by token. (1) `curl -F file=@big.js -H \"X-API-Key: <your dhk_mcp_ key>\" https://<host>/api/files/staged` returns { token, sha256, size_bytes }. (2) Pass that file as { path, staged_token } instead of { path, content }. The server reads the staged bytes and commits them verbatim, so 100+ KB sources push reliably without the model having to emit the content (which is where inline truncation comes from). Per file, provide exactly one of content or staged_token. Staged tokens are owner-scoped and expiring. DELETIONS: pass `deletions: [\"old/path.js\", ...]` to remove files in the SAME commit as the writes. Crane-hosted apps only (a GitHub-backed managed app is refused — GitHub's contents API cannot express a deletion). For a pure deletion send files: []. Every deleted path must already exist on the branch (a typo is refused by name, never a silent no-op), no path may appear in both files and deletions, and a push that would leave the repository with no files at all is refused. The response echoes what was removed as `deleted`.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -1275,7 +1276,7 @@
         },
         "files": {
           "type": "array",
-          "minItems": 1,
+          "minItems": 0,
           "maxItems": 200,
           "items": {
             "type": "object",
@@ -1306,6 +1307,15 @@
             ],
             "additionalProperties": false
           }
+        },
+        "deletions": {
+          "type": "array",
+          "maxItems": 200,
+          "items": {
+            "type": "string",
+            "description": "Repo-relative path to delete (no leading slash, no ..). Must already exist on the branch."
+          },
+          "description": "Paths to remove in this same commit. Crane-hosted (repo_backend=local) apps only. Combine with files, or send files: [] for a pure deletion."
         },
         "message": {
           "type": "string",
@@ -1608,7 +1618,7 @@
   },
   {
     "name": "appcrane_get_backup_status",
-    "description": "Is off-site backup actually working? Reports the scheduled S3/R2 backup config together with a verdict — `configured`, `enabled`, `healthy`, when it last ran and what is missing — so \"are we backed up\" is one call rather than an inference from raw settings. The backup covers the SQLite database (apps, users, settings, encrypted env vars), .env, icons and appdata, uploaded nightly as one zip. NEVER returns the secret access key; `has_secret` reports only whether one is stored. Read the `summary` first: a config can be fully populated and still not be running (enabled=false), and it can be enabled and failing every night (see last_error). PLATFORM ADMIN ONLY.",
+    "description": "Is backup actually working? Reports BOTH schedules — the off-site S3/R2 upload and the local nightly archive — with a verdict for each, so \"are we backed up\" is one call rather than an inference from raw settings. READ `off_site.has_off_site_copy` BEFORE ANY OTHER FIELD. It is true only when a destination is configured AND an upload has actually completed; a stored bucket with the schedule off, and a schedule that is on and has never finished, both produce NO copy off this host and both report false. When it is false, `off_site.notice` says so in words (\"No off-site copy — everything AppCrane knows lives on this host.\") and that sentence must be relayed, not summarised away: a local archive is not a substitute, because losing the host loses both copies. The LOCAL schedule (`local`) is ON BY DEFAULT and writes deployhub.db + .env ONLY, to DATA_DIR/backups/local, keeping `local.keep` copies — it covers a corrupted, deleted or badly-restored database, and nothing else: NOT app icons, NOT per-app /data, NOT declared volumes, NOT managed-app repositories, NOT images. The off-site upload covers the database, .env, icons and appdata. NEVER returns the secret access key; `has_secret` reports only whether one is stored. A config can be fully populated and still not be running (enabled=false), and it can be enabled and failing every night (see last_error). PLATFORM ADMIN ONLY.",
     "inputSchema": {
       "type": "object",
       "properties": {},
@@ -1679,7 +1689,7 @@
   },
   {
     "name": "appcrane_scan_report",
-    "description": "Which hosted apps have known-vulnerable dependencies? Reports the recorded CVE scan state for the whole fleet, or for one app with `slug`. REPORT ONLY: this scan has never blocked a deploy and cannot — the apps belong to other teams who did not choose the control, so findings are recorded and mailed and the deploy proceeds either way. Never relay a finding as a deploy failure. READ `status` BEFORE READING COUNTS. It is four-valued: `ok` (scanned, nothing found) and `findings` (scanned, something found) are results; `skipped` (no lockfile AppCrane can read) and `error` (OSV unreachable, unparseable lockfile) mean the app was NOT SCANNED, as does having no scan row at all. Those two carry no findings for the same reason an unopened box is empty, and an agent that reports such an app as clean has stated the opposite of what is known — \"no vulnerabilities found\" is only ever true of an app whose status is `ok`. `assurance` (none / partial / complete), `unscanned_count` and `unscanned_by_status` say how much of the fleet the numbers actually cover; read them before the findings. EVERY FINDING CARRIES `ecosystem` AND `fixed` beside `name`, `version` and `ids`. `fixed` is the version that resolves those advisories, or null when OSV PUBLISHED NO FIXED VERSION — a null means there is nothing to upgrade to yet, NEVER that no fix is needed and never that AppCrane did not look, so a null-`fixed` finding is not a harmless one. `manifests_scanned` says WHICH manifests were actually read, because coverage is per manifest and not per app: one scan row reads ONE manifest — the ecosystem named on it — so an app whose Go service was never read appears here beside its scanned npm frontend with an empty findings list, and that emptiness is evidence about the frontend only. Scans run at deploy AND daily, and the daily run is the one that matters, because it catches an advisory published against code that was already deployed and has not changed since. ADMIN ONLY.",
+    "description": "Which hosted apps have known-vulnerable dependencies? Reports the recorded CVE scan state for the whole fleet, or for one app with `slug`. REPORT ONLY: this scan has never blocked a deploy and cannot — the apps belong to other teams who did not choose the control, so findings are recorded and mailed and the deploy proceeds either way. Never relay a finding as a deploy failure. READ `status` BEFORE READING COUNTS. It is four-valued: `ok` (scanned, nothing found) and `findings` (scanned, something found) are results; `skipped` (no lockfile AppCrane can read) and `error` (OSV unreachable, unparseable lockfile) mean the app was NOT SCANNED, as does having no scan row at all. Those two carry no findings for the same reason an unopened box is empty, and an agent that reports such an app as clean has stated the opposite of what is known — \"no vulnerabilities found\" is only ever true of an app whose status is `ok`. READ `coverage` BEFORE THE FINDINGS AND BEFORE `assurance`. It is the explicit arithmetic — `{ rows, covered, not_covered, skipped, errored, never_scanned, percent }` — where `percent` is covered/rows floored, and it is the only field that says how much of the fleet these numbers describe. `assurance` is still none / partial / complete and still means exactly that, but `partial` spans 1% to 99%: 30 covered rows out of 99 is `partial` and so is 98 out of 99, so NEVER relay `partial` as \"mostly covered\" or relay it without the counts beside it (`assurance_note` states this too). `skip_reasons` and `error_reasons` name WHY rows are uncovered, counted and most-common first, from the reason each row recorded — quote them instead of reporting a bare \"67 skipped\". `unscanned_count` and `unscanned_by_status` are unchanged. EVERY FINDING CARRIES `ecosystem` AND `fixed` beside `name`, `version` and `ids`. `fixed` is the version that resolves those advisories, or null when OSV PUBLISHED NO FIXED VERSION — a null means there is nothing to upgrade to yet, NEVER that no fix is needed and never that AppCrane did not look, so a null-`fixed` finding is not a harmless one. `manifests_scanned` says WHICH manifests were actually read, because coverage is per manifest and not per app: one scan row reads ONE manifest — the ecosystem named on it — so an app whose Go service was never read appears here beside its scanned npm frontend with an empty findings list, and that emptiness is evidence about the frontend only. Scans run at deploy AND daily, and the daily run is the one that matters, because it catches an advisory published against code that was already deployed and has not changed since. ADMIN ONLY.",
     "inputSchema": {
       "type": "object",
       "properties": {
