@@ -849,6 +849,71 @@
     }
   },
   {
+    "name": "appcrane_get_app_context",
+    "description": "Read an app's agent context — the operator notes at DATA_DIR/apps/<slug>/agent-context.md that are injected into every AppCrane coder dispatch for that app. Use this before writing, so an append or a replace is an informed one. Returns an empty string when no context has been written yet. App admin or owner (or global admin) required, because these notes routinely contain internal detail about how an app is built and operated.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "slug": {
+          "type": "string",
+          "description": "App slug."
+        }
+      },
+      "required": [
+        "slug"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "appcrane_append_app_context",
+    "description": "Append a note to an app's agent context, so the AppCrane coder knows what you just learned. This is the tool to reach for by default: it cannot destroy what someone else wrote, which appcrane_set_app_context can. The note is added under a timestamped heading. Write what would be expensive for the next agent to rediscover — a constraint, a gotcha, why something is the way it is — not a transcript of what you did. App admin or owner required.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "slug": {
+          "type": "string",
+          "description": "App slug."
+        },
+        "note": {
+          "type": "string",
+          "description": "Markdown to append. Written under a heading naming who added it and when."
+        },
+        "heading": {
+          "type": "string",
+          "description": "Optional short title for this note, e.g. \"Deploy gotcha\". Defaults to a timestamp alone."
+        }
+      },
+      "required": [
+        "slug",
+        "note"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "appcrane_set_app_context",
+    "description": "REPLACE an app's entire agent context. Destructive: whatever a human or another agent wrote is gone. Prefer appcrane_append_app_context unless you are deliberately rewriting the whole document — and read it first with appcrane_get_app_context so you know what you are discarding. Pass an empty string to clear it. App admin or owner required.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "slug": {
+          "type": "string",
+          "description": "App slug."
+        },
+        "content": {
+          "type": "string",
+          "description": "The full new content. Replaces everything. Empty string clears the context."
+        }
+      },
+      "required": [
+        "slug",
+        "content"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
     "name": "appcrane_set_app_meta",
     "description": "Set an app's category, visibility, auth_mode, and/or auth_bypass_paths — the owner self-service fields (same controls the dashboard Launcher exposes to owners). Owner of the app (or global admin) required. visibility is one of public / private / hidden. auth_mode is `authenticated` (default — all routes go through AppCrane SSO) or `headless` (the app bypasses forward_auth ENTIRELY and is reachable without identity — right tool for telemetry ingest, public webhooks, status pages; the app's own server is responsible for any payload-level authn). A headless app is still served BY CADDY over HTTP — TLS, security headers and access logging all still apply; it is not a raw port. An app that does not speak HTTP at all needs ingress_type='tcp', and an app that speaks HTTP AND needs a second raw port for non-HTTP clients needs ingress_type='dual' (both via appcrane_set_app_ingress, platform admin only) — different and far more exposed things. auth_bypass_paths (v2.7.27+) is an array of path prefixes (e.g. [\"/ws/local-runner\"]) that bypass SSO on this app only — narrower than headless mode; the app authenticates those paths itself (e.g. token in query string). The platform strips incoming X-AppCrane-* headers on bypass paths (forgery defense intact) and suppresses access logging for them (token-in-query never sits in log storage). Owners may only assign an EXISTING category; creating a brand-new category is reserved for global admins. For powerful fields (github_url, branch, token, source_type, resource limits) use appcrane_update_app (admin only).",
     "inputSchema": {
