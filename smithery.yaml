@@ -1,0 +1,27 @@
+# Smithery listing: a local (stdio) server started with npx from the npm package.
+# The connector forwards each tools/call to your own AppCrane instance.
+startCommand:
+  type: stdio
+  configSchema:
+    type: object
+    required: [appcraneUrl, appcraneKey]
+    properties:
+      appcraneUrl:
+        type: string
+        description: Base URL of your own AppCrane instance, e.g. https://crane.example.com
+      appcraneKey:
+        type: string
+        description: Your AppCrane API key, sent to the instance as the X-API-Key header
+      appcraneGithubToken:
+        type: string
+        description: Optional GitHub token (X-Github-Token) that unlocks the github_* passthrough tools
+  commandFunction: |-
+    (config) => ({
+      command: 'npx',
+      args: ['-y', 'appcrane-mcp'],
+      env: {
+        APPCRANE_URL: config.appcraneUrl,
+        APPCRANE_KEY: config.appcraneKey,
+        ...(config.appcraneGithubToken ? { APPCRANE_GITHUB_TOKEN: config.appcraneGithubToken } : {}),
+      },
+    })

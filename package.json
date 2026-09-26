@@ -1,7 +1,7 @@
 {
   "name": "appcrane-mcp",
   "mcpName": "io.github.gitayg/appcrane",
-  "version": "1.3.3",
+  "version": "1.3.4",
   "description": "Standalone MCP connector for AppCrane \u2014 the self-hosted deployment platform for AI-built apps. Serves the appcrane_* tool catalog for offline introspection and proxies real tool calls to your AppCrane instance.",
   "type": "module",
   "license": "MIT",
