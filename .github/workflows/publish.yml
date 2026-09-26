@@ -1,0 +1,58 @@
+# Publish appcrane-mcp to npm when a version tag is pushed (git tag v1.3.0 && git push origin v1.3.0).
+#
+# npm Trusted Publishing: npm trusts THIS workflow file in THIS repo through GitHub's
+# OIDC identity, so there is no npm token and no one-time password anywhere. Provenance
+# (npm's "built from this commit" attestation) is added automatically for a public repo.
+# Configured on npmjs.com: appcrane-mcp -> Settings -> Trusted Publisher -> GitHub Actions,
+# gitayg / appcrane-mcp / publish.yml. Requires npm CLI >= 11.5.1 and Node >= 22.14.0.
+name: Publish to npm
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+  id-token: write   # the OIDC token npm exchanges for a one-off publish credential
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: appcrane-mcp
+
+      # catalog.json is generated from the platform's tool definitions; prepublishOnly
+      # refuses a stale one. Check it against the platform's current main, laid out as the
+      # sibling `deployhub` directory the generator expects.
+      - uses: actions/checkout@v4
+        with:
+          repository: gitayg/appCrane
+          path: deployhub
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      - name: npm new enough for trusted publishing
+        run: npm install -g npm@latest && npm --version
+
+      - name: The tag matches package.json
+        working-directory: appcrane-mcp
+        run: |
+          want="v$(node -p "require('./package.json').version")"
+          [ "$GITHUB_REF_NAME" = "$want" ] || { echo "tag $GITHUB_REF_NAME does not match package.json version $want"; exit 1; }
+
+      - name: Install the platform (the catalog check imports its tool definitions)
+        working-directory: deployhub
+        run: npm ci --omit=dev
+
+      - name: Install, check the catalog, build
+        working-directory: appcrane-mcp
+        run: npm ci && npm run check:catalog && npm run build
+
+      - name: Publish
+        working-directory: appcrane-mcp
+        run: npm publish

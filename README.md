@@ -103,9 +103,20 @@ Both catalog scripts import the platform's own `getToolCatalog()` from a sibling
 `deployhub` checkout; set `APPCRANE_SRC` to point at its `server/services/mcpTools.js`
 if yours lives elsewhere.
 
-**Run `npm run check:catalog` before every release.** Nothing regenerates the catalog
-automatically and the two repos share no CI, so it rots silently — it has already been
-caught 22 tools behind the platform (35 advertised against 57 real).
+### Releasing
+
+Bump `version` in `package.json`, commit, then push a matching tag:
+
+```bash
+git tag v1.3.0 && git push origin v1.3.0
+```
+
+`.github/workflows/publish.yml` publishes it to npm with **npm Trusted Publishing**: no npm
+token and no one-time password, and npm attaches provenance (the commit it was built from).
+The workflow refuses a tag that does not match `package.json`, and checks the catalog against
+the platform's current `main` before publishing, so a stale `catalog.json` cannot ship. (It
+has rotted silently before: 22 tools behind the platform, 35 advertised against 57 real.)
+Run `npm run check:catalog` locally first to find out before CI does.
 
 The bundled `catalog.json` is generated from the real tool definitions in the AppCrane platform (`deployhub/server/services/mcpTools.js`) and reflects the AWS-aligned tool vocabulary (`appcrane_set_secret`, `appcrane_get_secret`, `appcrane_cp`, and the `stage` parameter). It is committed so the package ships self-contained.
 
