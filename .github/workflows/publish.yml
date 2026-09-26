@@ -1,4 +1,4 @@
-# Publish appcrane-mcp to npm when a version tag is pushed (git tag v1.3.2 && git push origin v1.3.2).
+# Publish appcrane-mcp to npm when a version tag is pushed (git tag v1.3.3 && git push origin v1.3.3).
 #
 # npm Trusted Publishing: npm trusts THIS workflow file in THIS repo through GitHub's
 # OIDC identity, so there is no npm token and no one-time password anywhere. Provenance
@@ -11,7 +11,12 @@
 #            check catalog.json against the platform's tool definitions.
 #   publish  holds id-token: write. Checks out only this repo, installs only its own
 #            dependencies with install scripts disabled, builds, publishes.
-# Actions are pinned to commit SHAs (tags can be moved), and npm to an exact version.
+#   registry after publish, lists the version in the official MCP Registry
+#            (registry.modelcontextprotocol.io) as io.github.gitayg/appcrane, also
+#            by OIDC (mcp-publisher login github-oidc). The registry verifies ownership
+#            through `mcpName` in the published npm package.json.
+# Actions are pinned to commit SHAs (tags can be moved), npm to an exact version, and
+# mcp-publisher to a release whose SHA-256 is checked before it runs.
 name: Publish to npm
 
 on:
@@ -43,6 +48,11 @@ jobs:
         run: |
           want="v$(node -p "require('./package.json').version")"
           [ "$GITHUB_REF_NAME" = "$want" ] || { echo "tag $GITHUB_REF_NAME does not match package.json version $want"; exit 1; }
+          # Checked here too, so a stale server.json stops the release before npm has it.
+          for f in .version '.packages[0].version'; do
+            got="v$(jq -r "$f" server.json)"
+            [ "$got" = "$GITHUB_REF_NAME" ] || { echo "server.json $f is $got, tag is $GITHUB_REF_NAME"; exit 1; }
+          done
       - name: Install the platform (the catalog check imports its tool definitions)
         working-directory: deployhub
         run: npm ci --omit=dev
@@ -72,3 +82,31 @@ jobs:
       # checkout, which exists only in the catalog job, and that job already passed.
       - name: Publish
         run: npm publish --ignore-scripts
+
+  registry:
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write   # OIDC identity for the MCP Registry (namespace io.github.gitayg)
+    env:
+      MCP_PUBLISHER_VERSION: v1.8.1
+      MCP_PUBLISHER_SHA256: a06c9096dcb9727c13555b6be26c7effa707b01f06a4c561ba7a3635443cf2cc
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: server.json matches the tag
+        run: |
+          want="${GITHUB_REF_NAME#v}"
+          for f in .version '.packages[0].version'; do
+            got=$(jq -r "$f" server.json)
+            [ "$got" = "$want" ] || { echo "server.json $f is $got, tag is $want"; exit 1; }
+          done
+      - name: Install mcp-publisher (pinned, checksum verified)
+        run: |
+          curl -fsSL -o mcp-publisher.tar.gz "https://github.com/modelcontextprotocol/registry/releases/download/${MCP_PUBLISHER_VERSION}/mcp-publisher_linux_amd64.tar.gz"
+          echo "${MCP_PUBLISHER_SHA256}  mcp-publisher.tar.gz" | sha256sum -c -
+          tar xzf mcp-publisher.tar.gz mcp-publisher
+      - name: Publish to the MCP Registry
+        run: ./mcp-publisher login github-oidc && ./mcp-publisher publish

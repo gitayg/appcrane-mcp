@@ -108,7 +108,7 @@ if yours lives elsewhere.
 Bump `version` in `package.json`, commit, then push a matching tag:
 
 ```bash
-git tag v1.3.2 && git push origin v1.3.2
+git tag v1.3.3 && git push origin v1.3.3
 ```
 
 `.github/workflows/publish.yml` publishes it to npm with **npm Trusted Publishing**: no npm
@@ -117,6 +117,11 @@ The workflow refuses a tag that does not match `package.json`, and checks the ca
 the platform's current `main` before publishing, so a stale `catalog.json` cannot ship. (It
 has rotted silently before: 22 tools behind the platform, 35 advertised against 57 real.)
 Run `npm run check:catalog` locally first to find out before CI does.
+
+The same tag then lists the version in the official [MCP Registry](https://registry.modelcontextprotocol.io)
+as `io.github.gitayg/appcrane`, also by OIDC. Bump `version` and `packages[0].version` in
+`server.json` together with `package.json`: the workflow refuses a tag that does not match all three.
+(The listing sat at 1.0.0 while npm moved on, until this was automated.)
 
 The bundled `catalog.json` is generated from the real tool definitions in the AppCrane platform (`deployhub/server/services/mcpTools.js`) and reflects the AWS-aligned tool vocabulary (`appcrane_set_secret`, `appcrane_get_secret`, `appcrane_cp`, and the `stage` parameter). It is committed so the package ships self-contained.
 
