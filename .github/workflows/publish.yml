@@ -1,10 +1,17 @@
-# Publish appcrane-mcp to npm when a version tag is pushed (git tag v1.3.0 && git push origin v1.3.0).
+# Publish appcrane-mcp to npm when a version tag is pushed (git tag v1.3.2 && git push origin v1.3.2).
 #
 # npm Trusted Publishing: npm trusts THIS workflow file in THIS repo through GitHub's
 # OIDC identity, so there is no npm token and no one-time password anywhere. Provenance
 # (npm's "built from this commit" attestation) is added automatically for a public repo.
 # Configured on npmjs.com: appcrane-mcp -> Settings -> Trusted Publisher -> GitHub Actions,
 # gitayg / appcrane-mcp / publish.yml. Requires npm CLI >= 11.5.1 and Node >= 22.14.0.
+#
+# Two jobs, so code this repo does not control never runs where publishing is possible:
+#   catalog  read-only. Installs the platform (gitayg/appCrane) and its dependencies to
+#            check catalog.json against the platform's tool definitions.
+#   publish  holds id-token: write. Checks out only this repo, installs only its own
+#            dependencies with install scripts disabled, builds, publishes.
+# Actions are pinned to commit SHAs (tags can be moved), and npm to an exact version.
 name: Publish to npm
 
 on:
@@ -13,46 +20,55 @@ on:
 
 permissions:
   contents: read
-  id-token: write   # the OIDC token npm exchanges for a one-off publish credential
 
 jobs:
-  publish:
+  catalog:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           path: appcrane-mcp
-
-      # catalog.json is generated from the platform's tool definitions; prepublishOnly
-      # refuses a stale one. Check it against the platform's current main, laid out as the
-      # sibling `deployhub` directory the generator expects.
-      - uses: actions/checkout@v4
+          persist-credentials: false
+      # Laid out as the sibling `deployhub` directory the generator expects.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           repository: gitayg/appCrane
           path: deployhub
-
-      - uses: actions/setup-node@v4
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
-          registry-url: https://registry.npmjs.org
-
-      - name: npm new enough for trusted publishing
-        run: npm install -g npm@latest && npm --version
-
       - name: The tag matches package.json
         working-directory: appcrane-mcp
         run: |
           want="v$(node -p "require('./package.json').version")"
           [ "$GITHUB_REF_NAME" = "$want" ] || { echo "tag $GITHUB_REF_NAME does not match package.json version $want"; exit 1; }
-
       - name: Install the platform (the catalog check imports its tool definitions)
         working-directory: deployhub
         run: npm ci --omit=dev
-
-      - name: Install, check the catalog, build
+      - name: catalog.json matches the platform
         working-directory: appcrane-mcp
-        run: npm ci && npm run check:catalog && npm run build
+        run: npm run check:catalog
 
+  publish:
+    needs: catalog
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write   # the OIDC token npm exchanges for a one-off publish credential
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      - name: npm new enough for trusted publishing
+        run: npm install -g npm@11.20.0 && npm --version
+      - name: Install (no install scripts) and build
+        run: npm ci --ignore-scripts && npm run build
+      # --ignore-scripts skips prepublishOnly: its catalog check needs the platform
+      # checkout, which exists only in the catalog job, and that job already passed.
       - name: Publish
-        working-directory: appcrane-mcp
-        run: npm publish
+        run: npm publish --ignore-scripts
