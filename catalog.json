@@ -219,7 +219,7 @@
   },
   {
     "name": "appcrane_rollback",
-    "description": "Roll an env back to a prior release. Pass deployment_id (from appcrane_list_releases) to target a specific release, or omit it to roll back to the immediately previous one. Re-runs that release from its recorded build and health-checks it. A rollback to the IMMEDIATELY PREVIOUS release restarts the cached per-commit image without rebuilding, because image_retention defaults to 1 (the running image plus the one behind it); rolling back further, or on an app whose image_retention is 0, rebuilds that commit first. Records a NEW deployment and marks the previous live one rolled_back. Owner-only (or global admin).",
+    "description": "Roll an env back to a prior release. Pass deployment_id (from appcrane_list_releases) to target a specific release, or omit it to roll back to the immediately previous one. Re-runs that release from its recorded build and health-checks it. A rollback to the IMMEDIATELY PREVIOUS release restarts the cached per-commit image without rebuilding, because image_retention defaults to 1 (the running image plus the one behind it); rolling back further, or on an app whose image_retention is 0, rebuilds that commit first. Records a NEW deployment and marks the previous live one rolled_back. Owner-only (or platform admin).",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -248,7 +248,7 @@
   },
   {
     "name": "appcrane_promote",
-    "description": "Promote the current live SANDBOX release to production — the gated sandbox→prod path. Refuses unless sandbox is live AND currently healthy (you do not ship a broken sandbox to prod), and the promoted prod release is health-checked with auto-revert. For github apps this rebuilds production from the EXACT sandbox commit; for managed/upload apps it copies the exact tested sandbox release. Owner-only (or global admin).",
+    "description": "Promote the current live SANDBOX release to production — the gated sandbox→prod path. Refuses unless sandbox is live AND currently healthy (you do not ship a broken sandbox to prod), and the promoted prod release is health-checked with auto-revert. For github apps this rebuilds production from the EXACT sandbox commit; for managed/upload apps it copies the exact tested sandbox release. Owner-only (or platform admin).",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -311,6 +311,11 @@
             "validated"
           ],
           "description": "Target bucket."
+        },
+        "note": {
+          "type": "string",
+          "maxLength": 2000,
+          "description": "Optional, used with bucket=shipped. A short plain-language summary, for the person who filed the request, of what you changed and how it affects them. It is emailed to them and shown in their My Requests list. No code, diffs, file paths, credentials or other secrets. Max 2000 characters."
         }
       },
       "required": [
@@ -675,7 +680,7 @@
   },
   {
     "name": "appcrane_create_app",
-    "description": "Register a new app in AppCrane, either from a GitHub repository or from a prebuilt container image. Use this only after the user has explicitly confirmed they want to onboard a new app and told you which source to use — a real github URL, or an image reference for source_type='image'. Allocates ports, creates the data directories, configures Caddy routing, and starts health checks. After this returns, call appcrane_set_secret to set any required secrets, then appcrane_deploy to ship the first build. For an image app there is nothing to build: the deploy pulls image_ref and starts it, so also pass container_port and health_path unless the image happens to match AppCrane's own 3000 + /api/health defaults. Requires the create-apps permission (global admins, or any role a platform admin granted at Settings → Roles).",
+    "description": "Register a new app in AppCrane, either from a GitHub repository or from a prebuilt container image. Use this only after the user has explicitly confirmed they want to onboard a new app and told you which source to use — a real github URL, or an image reference for source_type='image'. Allocates ports, creates the data directories, configures Caddy routing, and starts health checks. After this returns, call appcrane_set_secret to set any required secrets, then appcrane_deploy to ship the first build. For an image app there is nothing to build: the deploy pulls image_ref and starts it, so also pass container_port and health_path unless the image happens to match AppCrane's own 3000 + /api/health defaults. Requires the create-apps permission (platform admins, or any role a platform admin granted at Settings → Roles).",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -840,6 +845,10 @@
         "max_cpu_percent": {
           "type": "number",
           "description": "Per-container CPU cap (0-100)."
+        },
+        "show_sandbox": {
+          "type": "boolean",
+          "description": "Offer the Sandbox deployment to members and viewers on the launch surfaces (default true). false hides it from them; owners, app admins and platform admins still see it, and the sandbox URL keeps working. App owner or platform admin only."
         }
       },
       "required": [
@@ -850,7 +859,7 @@
   },
   {
     "name": "appcrane_get_app_context",
-    "description": "Read an app's agent context — the operator notes at DATA_DIR/apps/<slug>/agent-context.md that are injected into every AppCrane coder dispatch for that app. Use this before writing, so an append or a replace is an informed one. Returns an empty string when no context has been written yet. App admin or owner (or global admin) required, because these notes routinely contain internal detail about how an app is built and operated.",
+    "description": "Read an app's agent context — the operator notes at DATA_DIR/apps/<slug>/agent-context.md that are injected into every AppCrane coder dispatch for that app. Use this before writing, so an append or a replace is an informed one. Returns an empty string when no context has been written yet. App admin or owner (or platform admin) required, because these notes routinely contain internal detail about how an app is built and operated.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -915,7 +924,7 @@
   },
   {
     "name": "appcrane_set_app_meta",
-    "description": "Set an app's category, visibility, auth_mode, and/or auth_bypass_paths — the owner self-service fields (same controls the dashboard Launcher exposes to owners). Owner of the app (or global admin) required. visibility is one of public / private / hidden. auth_mode is `authenticated` (default — all routes go through AppCrane SSO) or `headless` (the app bypasses forward_auth ENTIRELY and is reachable without identity — right tool for telemetry ingest, public webhooks, status pages; the app's own server is responsible for any payload-level authn). A headless app is still served BY CADDY over HTTP — TLS, security headers and access logging all still apply; it is not a raw port. An app that does not speak HTTP at all needs ingress_type='tcp', and an app that speaks HTTP AND needs a second raw port for non-HTTP clients needs ingress_type='dual' (both via appcrane_set_app_ingress, platform admin only) — different and far more exposed things. auth_bypass_paths (v2.7.27+) is an array of path prefixes (e.g. [\"/ws/local-runner\"]) that bypass SSO on this app only — narrower than headless mode; the app authenticates those paths itself (e.g. token in query string). The platform strips incoming X-AppCrane-* headers on bypass paths (forgery defense intact) and suppresses access logging for them (token-in-query never sits in log storage). Owners may only assign an EXISTING category; creating a brand-new category is reserved for global admins. For powerful fields (github_url, branch, token, source_type, resource limits) use appcrane_update_app (admin only).",
+    "description": "Set an app's category, visibility, auth_mode, and/or auth_bypass_paths — the owner self-service fields (same controls the dashboard Launcher exposes to owners). Owner of the app (or platform admin) required. visibility is one of public / private / hidden. auth_mode is `authenticated` (default — all routes go through AppCrane SSO) or `headless` (the app bypasses forward_auth ENTIRELY and is reachable without identity — right tool for telemetry ingest, public webhooks, status pages; the app's own server is responsible for any payload-level authn). A headless app is still served BY CADDY over HTTP — TLS, security headers and access logging all still apply; it is not a raw port. An app that does not speak HTTP at all needs ingress_type='tcp', and an app that speaks HTTP AND needs a second raw port for non-HTTP clients needs ingress_type='dual' (both via appcrane_set_app_ingress, platform admin only) — different and far more exposed things. auth_bypass_paths (v2.7.27+) is an array of path prefixes (e.g. [\"/ws/local-runner\"]) that bypass SSO on this app only — narrower than headless mode; the app authenticates those paths itself (e.g. token in query string). The platform strips incoming X-AppCrane-* headers on bypass paths (forgery defense intact) and suppresses access logging for them (token-in-query never sits in log storage). Owners may only assign an EXISTING category; creating a brand-new category is reserved for platform admins. For powerful fields (github_url, branch, token, source_type, resource limits) use appcrane_update_app (admin only).",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -1022,6 +1031,14 @@
           "minimum": 1024,
           "maximum": 65535,
           "description": "CONTAINER port the raw publish targets, 1024-65535. REQUIRED with ingress_type='dual'. On any other type the only accepted value is null, which DROPS a data plane the app still has pinned — required to flip a dual app to 'tcp', since that publishes container port 3000 instead. Must NOT be 3000: that is the app's HTTP control plane, the port Caddy proxies to, and publishing it raw would expose the ordinary HTTP origin with no TLS, no forward_auth, no identity headers and no request audit. Give the data plane its own listener on another port inside the container. Unlike public_port this is not globally unique — container network namespaces are separate, so two apps may each use the same container-side port."
+        },
+        "data_plane_protocol": {
+          "type": "string",
+          "enum": [
+            "tcp",
+            "udp"
+          ],
+          "description": "Transport of the raw data plane. Only valid with ingress_type='dual' (a pure-tcp app's published port is its HTTP port, which the health probe reaches over TCP). Default tcp. Use udp for UDP-only protocols — e.g. a WireGuard relay, whose clients speak nothing else. Omit to keep the current value."
         }
       },
       "required": [
@@ -1033,7 +1050,7 @@
   },
   {
     "name": "appcrane_list_app_members",
-    "description": "List every user who has access to an app, with their per-app role (owner / admin / user / viewer / none). Use this before granting or revoking to see who is already in. Returns email + name + role for each member. App-admin or owner of the app required (or global admin / platform_admin).",
+    "description": "List every user who has access to an app, with their per-app role (owner / admin / user / viewer / none). Use this before granting or revoking to see who is already in. Returns email + name + role for each member. App-admin or owner of the app required (or platform admin).",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -1049,7 +1066,7 @@
   },
   {
     "name": "appcrane_grant_app_access",
-    "description": "Grant a user access to an app at a specific per-app role. `user` accepts a numeric user id, an email, or a username — first match wins. role defaults to \"user\". Idempotent: existing rows are upgraded/downgraded to the new role. App-admin or owner of the app required (or global admin).",
+    "description": "Grant a user access to an app at a specific per-app role. `user` accepts a numeric user id, an email, or a username — first match wins. role defaults to \"user\". Idempotent: existing rows are upgraded/downgraded to the new role. App-admin or owner of the app required (or platform admin).",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -1079,7 +1096,7 @@
   },
   {
     "name": "appcrane_revoke_app_access",
-    "description": "Remove a user's access from an app entirely. Idempotent: returns ok even if the user had no access. App-admin or owner of the app required (or global admin). Refuses to remove the only remaining owner.",
+    "description": "Remove a user's access from an app entirely. Idempotent: returns ok even if the user had no access. App-admin or owner of the app required (or platform admin). Refuses to remove the only remaining owner.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -1175,7 +1192,7 @@
   },
   {
     "name": "appcrane_list_access_requests",
-    "description": "List pending access requests — enhancement_requests rows whose message starts with \"Access request for app …\" (the portal's Request-access button posts these). With slug, scopes to one app; without, returns access requests across every app the caller can administer. App-admin / owner / global admin required.",
+    "description": "List pending access requests — enhancement_requests rows whose message starts with \"Access request for app …\" (the portal's Request-access button posts these). With slug, scopes to one app; without, returns access requests across every app the caller can administer. App-admin / owner / platform admin required.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -1189,7 +1206,7 @@
   },
   {
     "name": "appcrane_approve_access_request",
-    "description": "Approve a pending access request: grants the requester access to the app at `role` (default \"user\") and marks the enhancement_request as done. Verifies the request is actually an access request before acting. App-admin / owner / global admin required.",
+    "description": "Approve a pending access request: grants the requester access to the app at `role` (default \"user\") and marks the enhancement_request as done. Verifies the request is actually an access request before acting. App-admin / owner / platform admin required.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -1215,7 +1232,7 @@
   },
   {
     "name": "appcrane_deny_access_request",
-    "description": "Deny a pending access request: marks the enhancement_request as done WITHOUT granting access. Optionally appends a reason to the original message so the requester (and the audit trail) sees why. App-admin / owner / global admin required.",
+    "description": "Deny a pending access request: marks the enhancement_request as done WITHOUT granting access. Optionally appends a reason to the original message so the requester (and the audit trail) sees why. App-admin / owner / platform admin required.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -1235,7 +1252,7 @@
   },
   {
     "name": "appcrane_set_app_icon",
-    "description": "Set the tile icon for an app (shown on the Dashboard, the Launcher cards, the Manage table, and the frame topbar). Accepts a base64-encoded image in PNG / SVG / WEBP / JPEG / GIF. For repo-tracked icons prefer committing public/icon.png to the repo — AppCrane picks it up automatically on each deploy. Use this MCP tool when the icon needs to change without a redeploy, or when the source isn't in the repo. Replaces any existing icon. App-admin or owner required (or global admin).",
+    "description": "Set the tile icon for an app (shown on the Dashboard, the Launcher cards, the Manage table, and the frame topbar). Accepts a base64-encoded image in PNG / SVG / WEBP / JPEG / GIF. For repo-tracked icons prefer committing public/icon.png to the repo — AppCrane picks it up automatically on each deploy. Use this MCP tool when the icon needs to change without a redeploy, or when the source isn't in the repo. Replaces any existing icon. App-admin or owner required (or platform admin).",
     "inputSchema": {
       "type": "object",
       "properties": {
