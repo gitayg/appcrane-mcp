@@ -108,7 +108,7 @@ if yours lives elsewhere.
 Bump `version` in `package.json`, commit, then push a matching tag:
 
 ```bash
-git tag v1.3.6 && git push origin v1.3.6
+git tag v1.3.7 && git push origin v1.3.7
 ```
 
 `.github/workflows/publish.yml` publishes it to npm with **npm Trusted Publishing**: no npm
