@@ -127,7 +127,7 @@
   },
   {
     "name": "appcrane_reveal_secret",
-    "description": "Reveal the PLAINTEXT of ONE secret by key. Use ONLY when the user explicitly needs the actual value — it will appear in this conversation transcript, so treat the transcript as sensitive afterward (and consider rotating the secret if the transcript may be stored/shared). For checking whether a var is set, comparing values, or seeing what exists, use appcrane_get_secret (masked) instead — do NOT reveal just to inspect config. Single key only — it never dumps the whole env. Every reveal is audit-logged. Defaults to sandbox; env=\"production\" only when the user explicitly asks. App-admin or AppCrane admin only.",
+    "description": "Reveal the PLAINTEXT of ONE secret by key. Use ONLY when the user explicitly needs the actual value — it will appear in this conversation transcript, so treat the transcript as sensitive afterward (and consider rotating the secret if the transcript may be stored/shared). For checking whether a var is set, comparing values, or seeing what exists, use appcrane_get_secret (masked) instead — do NOT reveal just to inspect config. Single key only — it never dumps the whole env. Every reveal is audit-logged. Defaults to sandbox; env=\"production\" only when the user explicitly asks. App admins can reveal sandbox values; a PRODUCTION value needs the app owner or a platform admin.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -1070,7 +1070,7 @@
   },
   {
     "name": "appcrane_grant_app_access",
-    "description": "Grant a user access to an app at a specific per-app role. `user` accepts a numeric user id, an email, or a username — first match wins. role defaults to \"user\". Idempotent: existing rows are upgraded/downgraded to the new role. App-admin or owner of the app required (or platform admin).",
+    "description": "Grant a user access to an app at a specific per-app role. `user` accepts a numeric user id, an email, or a username — first match wins. role defaults to \"user\". Idempotent: existing rows are upgraded/downgraded to the new role. App-admin or owner of the app required (or platform admin); only an owner or platform admin can grant or change the owner role.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -1100,7 +1100,7 @@
   },
   {
     "name": "appcrane_revoke_app_access",
-    "description": "Remove a user's access from an app entirely. Idempotent: returns ok even if the user had no access. App-admin or owner of the app required (or platform admin). Refuses to remove the only remaining owner.",
+    "description": "Remove a user's access from an app entirely. Idempotent: returns ok even if the user had no access. App-admin or owner of the app required (or platform admin); only an owner or platform admin can remove an owner. Refuses to remove the only remaining owner.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -1210,7 +1210,7 @@
   },
   {
     "name": "appcrane_approve_access_request",
-    "description": "Approve a pending access request: grants the requester access to the app at `role` (default \"user\") and marks the enhancement_request as done. Verifies the request is actually an access request before acting. App-admin / owner / platform admin required.",
+    "description": "Approve a pending access request: grants the requester access to the app at `role` (default \"user\") and marks the enhancement_request as done. Verifies the request is actually an access request before acting. App-admin / owner / platform admin required; only an owner or platform admin can approve at the owner role.",
     "inputSchema": {
       "type": "object",
       "properties": {
