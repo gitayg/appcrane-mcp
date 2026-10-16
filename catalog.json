@@ -101,7 +101,7 @@
   },
   {
     "name": "appcrane_get_secret",
-    "description": "List an app's secrets (encrypted env vars) with their values MASKED — safe to show in chat. For each key you get: is_set, length, a short preview (last 3 chars, rest masked; fully masked for short values), a sha256 `fingerprint` (compare two envs or detect a changed value without seeing it), and updated_at. This is what you want for \"is X set?\", \"did the key change?\", \"which vars exist?\". Does NOT return plaintext — a secret never lands in the transcript. To read one actual value, use appcrane_reveal_secret with a specific key. Defaults to sandbox; pass env=\"production\" only when the user explicitly says production. App-admin or AppCrane admin only.",
+    "description": "List an app's secrets (encrypted env vars) with their values MASKED — safe to show in chat. For each key you get: is_set, length, a short preview (last 3 chars, rest masked; fully masked for short values), a keyed `fingerprint` (compare two envs or detect a changed value without seeing it; it cannot be checked against guesses), and updated_at. For a PRODUCTION value you may not reveal (anyone but the app owner or a platform admin), length is left out and the preview is fully masked. This is what you want for \"is X set?\", \"did the key change?\", \"which vars exist?\". Does NOT return plaintext — a secret never lands in the transcript. To read one actual value, use appcrane_reveal_secret with a specific key. Defaults to sandbox; pass env=\"production\" only when the user explicitly says production. App-admin or AppCrane admin only.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -484,7 +484,7 @@
   },
   {
     "name": "appcrane_rename_app",
-    "description": "Rename an app's slug. The slug is its URL, its container name and its data directory, so this changes all three — but it is NOT destructive: deploy history, env vars, ports, per-app roles and grants are keyed on the app id, not the slug, and survive untouched. The old slug is kept as a redirect unless redirect=false. Platform admin. Use this instead of recreating an app under a new name, which is what loses the history. To free a slug held by an app you no longer want, rename THAT app out of the way with redirect=false rather than deleting it — deleting clears the database rows but leaves data/apps/<slug> on disk, and the rename then refuses because the directory is still there.",
+    "description": "Rename an app's slug. The slug is its URL, its container name and its data directory, so this changes all three — but it is NOT destructive: deploy history, env vars, ports, per-app roles and grants are keyed on the app id, not the slug, and survive untouched. The old slug is kept as a redirect unless redirect=false. The app's owner or a platform admin; only a platform admin may pass redirect=false, and an owner may rename an app at most 3 times in 24 hours. Use this instead of recreating an app under a new name, which is what loses the history. To free a slug held by an app you no longer want, rename THAT app out of the way with redirect=false rather than deleting it — deleting clears the database rows but leaves data/apps/<slug> on disk, and the rename then refuses because the directory is still there.",
     "inputSchema": {
       "type": "object",
       "properties": {
