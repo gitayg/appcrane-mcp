@@ -1774,6 +1774,23 @@
     }
   },
   {
+    "name": "appcrane_get_app_scan",
+    "description": "The latest recorded dependency scan of ONE app, per stage (production and sandbox): each stage's `status`, the manifest it read, and its findings, each with `name`, `version`, `ecosystem`, advisory `ids` and `fixed` (the version that resolves them, or null when no fix is published yet — null never means harmless). Use it before changing a manifest or lockfile to see what is actually flagged on the live release, and after a release to check a finding is gone. READ `status` FIRST: `ok` and `findings` are scan results; `skipped`, `error` or no scan row mean the stage was NOT scanned, which is not a clean result. Coverage is per manifest: a manifest not named in `manifests_scanned` was never read. Report-only: findings never block a deploy. Any member of the app; the same findings the scan-opened requests carry.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "slug": {
+          "type": "string",
+          "description": "App slug, e.g. \"mysite\""
+        }
+      },
+      "required": [
+        "slug"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
     "name": "appcrane_scan_report",
     "description": "Which hosted apps have known-vulnerable dependencies? Reports the recorded CVE scan state for the whole fleet, or for one app with `slug`. REPORT ONLY: this scan has never blocked a deploy and cannot — the apps belong to other teams who did not choose the control, so findings are recorded and mailed and the deploy proceeds either way. Never relay a finding as a deploy failure. READ `status` BEFORE READING COUNTS. It is four-valued: `ok` (scanned, nothing found) and `findings` (scanned, something found) are results; `skipped` (no lockfile AppCrane can read) and `error` (OSV unreachable, unparseable lockfile) mean the app was NOT SCANNED, as does having no scan row at all. Those two carry no findings for the same reason an unopened box is empty, and an agent that reports such an app as clean has stated the opposite of what is known — \"no vulnerabilities found\" is only ever true of an app whose status is `ok`. READ `coverage` BEFORE THE FINDINGS AND BEFORE `assurance`. It is the explicit arithmetic — `{ rows, covered, not_covered, skipped, errored, never_scanned, percent }` — where `percent` is covered/rows floored, and it is the only field that says how much of the fleet these numbers describe. `assurance` is still none / partial / complete and still means exactly that, but `partial` spans 1% to 99%: 30 covered rows out of 99 is `partial` and so is 98 out of 99, so NEVER relay `partial` as \"mostly covered\" or relay it without the counts beside it (`assurance_note` states this too). `skip_reasons` and `error_reasons` name WHY rows are uncovered, counted and most-common first, from the reason each row recorded — quote them instead of reporting a bare \"67 skipped\". `unscanned_count` and `unscanned_by_status` are unchanged. EVERY FINDING CARRIES `ecosystem` AND `fixed` beside `name`, `version` and `ids`. `fixed` is the version that resolves those advisories, or null when OSV PUBLISHED NO FIXED VERSION — a null means there is nothing to upgrade to yet, NEVER that no fix is needed and never that AppCrane did not look, so a null-`fixed` finding is not a harmless one. `manifests_scanned` says WHICH manifests were actually read, because coverage is per manifest and not per app: one scan row reads ONE manifest — the ecosystem named on it — so an app whose Go service was never read appears here beside its scanned npm frontend with an empty findings list, and that emptiness is evidence about the frontend only. Scans run at deploy AND daily, and the daily run is the one that matters, because it catches an advisory published against code that was already deployed and has not changed since. ADMIN ONLY.",
     "inputSchema": {
