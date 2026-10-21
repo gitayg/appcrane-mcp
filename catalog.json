@@ -554,7 +554,7 @@
   },
   {
     "name": "appcrane_push_staged_file",
-    "description": "Move a previously-staged file into a running container at a path under /app or /data. THE WAY TO GET LARGE BINARIES (DMGs, datasets, bundles) into a container when they're too big to inline through appcrane_cp. Two steps: (1) upload the bytes with a plain multipart POST to `curl -F file=@local.dmg -H \"X-API-Key: <your dhk_mcp_ key>\" https://<host>/api/files/staged` — your MCP key IS allowed on this endpoint (v2.10.6+); it returns { token, sha256, size_bytes }. (2) Call this tool with that token and a dest path. The container must be running. Path is validated (no \"..\", must start with /app or /data). The staged blob is deleted on success.",
+    "description": "Move a previously-staged file into a running container at a path under /app or /data. THE WAY TO GET LARGE BINARIES (DMGs, datasets, bundles) into a container when they're too big to inline through appcrane_cp. Two steps: (1) upload the bytes with a plain multipart POST to `curl -F file=@local.dmg -H \"X-API-Key: <your dhk_mcp_ key>\" https://<host>/api/files/staged` — your MCP key IS allowed on this endpoint (v2.10.6+); it returns { token, sha256, size_bytes }. (2) Call this tool with that token and a dest path. The container must be running. Path is validated (no \"..\", must start with /app or /data). The staged blob is deleted on success. For files too big for one request: POST /api/files/staged/chunked {slug, filename} returns a handle; then PUT the bytes with Content-Type: application/octet-stream to /api/files/staged/<handle>?offset=N (N = bytes sent so far; a 409 says where to resume); then POST /api/files/staged/<handle>/finalize {sha256}. The token it returns works here.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -741,6 +741,36 @@
         "max_cpu_percent": {
           "type": "number",
           "description": "Per-container CPU cap. Default: 50."
+        },
+        "intake": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "App intake. data_classification decides whether production waits for a platform admin's security approval (by default confidential and restricted do; sandbox never waits). Omitted: internal.",
+          "properties": {
+            "purpose": {
+              "type": "string"
+            },
+            "data_classification": {
+              "type": "string",
+              "enum": [
+                "public",
+                "internal",
+                "confidential",
+                "restricted"
+              ]
+            },
+            "personal_data": {
+              "type": "boolean",
+              "description": "Stores personal or customer data"
+            },
+            "external_integrations": {
+              "type": "string"
+            },
+            "access": {
+              "type": "string",
+              "description": "Who should have access"
+            }
+          }
         }
       },
       "required": [
@@ -1309,6 +1339,177 @@
     }
   },
   {
+    "name": "appcrane_adopt_app",
+    "description": "Adopt an app built with Lovable, Bolt, v0, Replit, Figma Make or any GitHub repo / zip onto this AppCrane: behind its SSO, scanned, deployed to the SANDBOX only. Two steps. (1) action=\"analyze\" with github_url (public, or private with github_token) or zip_url (an https link to a zip). Nothing from the project is executed: AppCrane reads the files, detects the framework, build/start commands and port, the env vars the code reads, Supabase/Firebase/Clerk/Auth0 usage and hardcoded secrets, and returns an adoption report plus an adoption_id. A Lovable/Bolt/v0/Replit project URL is not importable directly; the error says which export step to use. (2) action=\"adopt\" with adoption_id, name, slug and env_vars=[{key,value}] creates a Crane-hosted managed app, commits the code plus any missing Dockerfile/deployhub.json/health endpoint, stores the env vars encrypted for the sandbox, starts the first sandbox deploy, records the intake (purpose, data_classification, intake_answers) and with open_requests=true opens one request per needed change for the coder. stage must be \"sandbox\"; production is refused. A report with critical risks (e.g. a Supabase service-role key in client code) needs acknowledge_risks=true. Follow the deploy with appcrane_wait_deploy.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "action": {
+          "type": "string",
+          "enum": [
+            "analyze",
+            "adopt"
+          ],
+          "description": "analyze a source, or adopt a previous analysis."
+        },
+        "github_url": {
+          "type": "string",
+          "description": "analyze: GitHub repository URL (optionally .../tree/<branch>)."
+        },
+        "ref": {
+          "type": "string",
+          "description": "analyze: branch, tag or commit. Defaults to the default branch."
+        },
+        "github_token": {
+          "type": "string",
+          "description": "analyze: a token that can read a private repository. Used once, never stored."
+        },
+        "zip_url": {
+          "type": "string",
+          "description": "analyze: https URL of a project zip (private addresses and redirects are refused)."
+        },
+        "adoption_id": {
+          "type": "string",
+          "description": "adopt: the id returned by analyze."
+        },
+        "name": {
+          "type": "string",
+          "description": "adopt: display name."
+        },
+        "slug": {
+          "type": "string",
+          "description": "adopt: URL slug, lowercase letters, digits and dashes."
+        },
+        "description": {
+          "type": "string",
+          "description": "adopt: optional app description."
+        },
+        "env_vars": {
+          "type": "array",
+          "maxItems": 200,
+          "items": {
+            "type": "object",
+            "properties": {
+              "key": {
+                "type": "string"
+              },
+              "value": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "key",
+              "value"
+            ],
+            "additionalProperties": false
+          },
+          "description": "adopt: sandbox env vars to set (stored encrypted). Values found in an uploaded .env are used for keys you leave out."
+        },
+        "intake": {
+          "type": "object",
+          "properties": {
+            "purpose": {
+              "type": "string"
+            },
+            "data_classification": {
+              "type": "string"
+            },
+            "owner": {
+              "type": "number"
+            },
+            "intake_answers": {
+              "type": "object",
+              "properties": {
+                "personal_data": {
+                  "type": "boolean"
+                },
+                "external_integrations": {
+                  "type": "string"
+                },
+                "access": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false,
+          "description": "adopt: intake record for the new app."
+        },
+        "open_requests": {
+          "type": "boolean",
+          "description": "adopt: open a request per change the report asks for."
+        },
+        "acknowledge_risks": {
+          "type": "boolean",
+          "description": "adopt: required when the report has critical risks."
+        },
+        "stage": {
+          "type": "string",
+          "enum": [
+            "sandbox"
+          ],
+          "description": "adopt: must be \"sandbox\". Production is refused."
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "appcrane_delete_app",
+    "description": "Permanently delete an app from AppCrane. IRREVERSIBLE. Stops and removes its sandbox and production containers, images and Docker volume records, drops its managed databases, and deletes its rows (deployments, env vars, health, webhooks, backups records, roles, sessions); Caddy routes are removed. Pass confirm_slug equal to slug, typed out: a call without it, or with any other value, is refused and changes nothing. Ask the user before calling this. Only the app's owner or a platform admin may delete, and only when the role matrix also grants app.delete (the same gate as the dashboard's Delete button). Read-only keys, the coder's connection, and keys whose MCP scope excludes the app are refused. Kept: the audit trail; files under the app's data directory on the host; for a Crane-hosted (local git) managed app its bare repository at DATA_DIR/repos/<slug>.git, so a new managed app cannot reuse the slug until an operator removes that repository; a GitHub repository is never touched.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "slug": {
+          "type": "string",
+          "description": "Slug of the app to delete."
+        },
+        "confirm_slug": {
+          "type": "string",
+          "description": "Must equal slug exactly. A safeguard against deleting the wrong app."
+        }
+      },
+      "required": [
+        "slug",
+        "confirm_slug"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "appcrane_get_audit",
+    "description": "Read an app's audit trail: who deployed, who changed env vars or secrets, who was granted access, every MCP tool call against it, newest first. Needs the app.audit.view permission on that app (default: the app owner, app admins and platform admins; plain members are refused unless the role matrix grants it). Paginate with before: pass the next_before value from the previous page to get older rows; next_before is null on the last page. limit defaults to 50, max 200. action filters by a substring of the action name, e.g. \"deploy\", \"env\", \"mcp.appcrane_set_secret\". Credential-bearing fields in detail are shown as [redacted].",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "slug": {
+          "type": "string",
+          "description": "App slug."
+        },
+        "limit": {
+          "type": "number",
+          "description": "Rows per page. Default 50, max 200."
+        },
+        "before": {
+          "type": "number",
+          "description": "Return rows with an id lower than this (the next_before of the previous page)."
+        },
+        "action": {
+          "type": "string",
+          "description": "Only rows whose action contains this text."
+        }
+      },
+      "required": [
+        "slug"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
     "name": "appcrane_create_managed_app",
     "description": "Create a new managed app — AppCrane creates and owns its git repository, and the agent works against it through appcrane_push_to_managed_app / appcrane_managed_* tools without the end user ever needing a GitHub account or PAT. New managed apps are hosted on this AppCrane server: there is no GitHub repo and no web URL, so github_* tools cannot reach it (managed apps created before this keep their GitHub repo and work as before). Use this when the user does not have a GitHub account or does not want to deal with GitHub at all. Returns the same shape as appcrane_create_app, plus the repo metadata. IDEMPOTENT RECOVERY: if the slug already exists as a managed app but its AMC_ repo was never created (a half-created app from an earlier failure — push then returns REPO_NOT_FOUND), calling this again re-provisions the missing repo where that app's repo belongs and returns { repaired: true } instead of erroring. So if a create attempt half-failed, just call it again with the same slug. Owner-or-admin to repair an existing one.",
     "inputSchema": {
@@ -1341,6 +1542,36 @@
         "max_cpu_percent": {
           "type": "number",
           "description": "Per-container CPU cap. Default: 50."
+        },
+        "intake": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "App intake. data_classification decides whether production waits for a platform admin's security approval (by default confidential and restricted do; sandbox never waits). Omitted: internal.",
+          "properties": {
+            "purpose": {
+              "type": "string"
+            },
+            "data_classification": {
+              "type": "string",
+              "enum": [
+                "public",
+                "internal",
+                "confidential",
+                "restricted"
+              ]
+            },
+            "personal_data": {
+              "type": "boolean",
+              "description": "Stores personal or customer data"
+            },
+            "external_integrations": {
+              "type": "string"
+            },
+            "access": {
+              "type": "string",
+              "description": "Who should have access"
+            }
+          }
         }
       },
       "required": [
@@ -1757,7 +1988,7 @@
   },
   {
     "name": "appcrane_run_backup_now",
-    "description": "Run the off-site backup immediately and report what was uploaded. Use this to PROVE a new configuration works instead of waiting for the nightly run to fail quietly — it exercises the real credentials, the real bucket and the real upload path, and records the result in last_run / last_error exactly as the scheduled job does. Works whether or not the schedule is enabled, so a configuration can be verified before turning it on. Uploads a zip of the SQLite database, .env, icons and appdata. PLATFORM ADMIN ONLY.",
+    "description": "Run the off-site backup immediately and report what was uploaded. Use this to PROVE a new configuration works instead of waiting for the nightly run to fail quietly — it exercises the real credentials, the real bucket and the real upload path, and records the result in last_run / last_error exactly as the scheduled job does. Works whether or not the schedule is enabled, so a configuration can be verified before turning it on. Uploads a verified backup set: the database, .env, icons, per-app /data and volumes, managed-database dumps and every managed-app git repository, plus a SHA-256 manifest (`key` is the manifest key, `size` the total bytes of the set). PLATFORM ADMIN ONLY.",
     "inputSchema": {
       "type": "object",
       "properties": {},
