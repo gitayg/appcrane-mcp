@@ -997,7 +997,11 @@
         },
         "domain": {
           "type": "string",
-          "description": "v2.10.0: custom domain (e.g. \"raise.glick.run\") that serves this app at the ROOT of that domain with NO AppCrane SSO and NO topbar — the app does its own auth. Maps to production. Requires the domain's DNS to point at this host (Caddy auto-provisions TLS). Pass \"\" or null to remove. The /<slug> path under the platform domain stays."
+          "description": "v2.10.0: custom domain (e.g. \"app.example.com\") that serves this app at the ROOT of that domain with NO AppCrane SSO and NO topbar — the app does its own auth (unless custom_domain_auth is on). Maps to production. Requires the domain's DNS to point at this host (Caddy auto-provisions TLS). Pass \"\" or null to remove. The /<slug> path under the platform domain stays."
+        },
+        "custom_domain_auth": {
+          "type": "boolean",
+          "description": "true = put the app's normal AppCrane sign-in in front of its custom domain too (visitors are signed in by a one-time handoff from the platform host; production roles apply). false (default) = the custom domain has no AppCrane sign-in and the app does its own auth. Same permission as domain."
         }
       },
       "required": [
