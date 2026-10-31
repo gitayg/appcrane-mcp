@@ -866,7 +866,7 @@
           "items": {
             "type": "string"
           },
-          "description": "v2.7.27: array of path prefixes (e.g. [\"/ws/local-runner\"]) that bypass SSO forward_auth on this app. Requests under these prefixes reach the container with NO X-AppCrane-* identity headers — the app authenticates them itself (e.g. token in query string). Caddy suppresses access logging for these paths to prevent token leakage to log storage. Pass [] or null to clear."
+          "description": "v2.7.27: array of path prefixes (e.g. [\"/ws/local-runner\"]) that bypass SSO forward_auth on this app. Requests under these prefixes reach the container with NO X-AppCrane-* identity headers — the app authenticates them itself (e.g. token in query string). Caddy access-logs these paths with the query string redacted, so a query-string token never reaches log storage. Pass [] or null to clear."
         },
         "max_ram_mb": {
           "type": "number",
@@ -993,7 +993,7 @@
           "items": {
             "type": "string"
           },
-          "description": "v2.7.27: array of path prefixes (e.g. [\"/ws/local-runner\"]) that bypass SSO forward_auth on this app. Requests under these prefixes reach the container with NO X-AppCrane-* identity headers — the app authenticates them itself. Caddy suppresses access logging for these paths to prevent query-string-token leakage. Pass [] or null to clear."
+          "description": "v2.7.27: array of path prefixes (e.g. [\"/ws/local-runner\"]) that bypass SSO forward_auth on this app. Requests under these prefixes reach the container with NO X-AppCrane-* identity headers — the app authenticates them itself. Caddy access-logs these paths with the query string redacted, so a query-string token never reaches log storage. Pass [] or null to clear."
         },
         "domain": {
           "type": "string",
@@ -1509,6 +1509,80 @@
       },
       "required": [
         "slug"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "appcrane_submit_feedback",
+    "description": "Send feedback (a bug, an idea, anything else) about an app or about AppCrane itself, when the user asks you to report something, for example \"send AppCrane feedback that the deploy error did not name the missing env var\". Put the user's point in message in plain words; attach what you know in context (the appcrane_* tool you were using, what the user asked for, the deploy id, the error text, your client name and version) without asking the user for it. With slug set, it goes to that app's request queue (you need access to the app); with slug omitted, it goes to the AppCrane platform admins. Secrets and e-mail addresses are removed before it is stored. Limit 20 an hour per user. Returns { id, target, where }: tell the user where to see it.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "message": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000,
+          "description": "The feedback in plain language, in the user's words."
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "bug",
+            "feature",
+            "other"
+          ],
+          "default": "bug",
+          "description": "bug, feature or other."
+        },
+        "slug": {
+          "type": "string",
+          "description": "The app the feedback is about. Omit (or \"appcrane\") for feedback about AppCrane itself."
+        },
+        "stage": {
+          "type": "string",
+          "enum": [
+            "sandbox",
+            "production"
+          ],
+          "description": "The environment it happened in, if any. Target stage (legacy alias: env)."
+        },
+        "context": {
+          "type": "object",
+          "description": "What you know about the situation. Only these fields are accepted.",
+          "properties": {
+            "tool": {
+              "type": "string",
+              "maxLength": 100,
+              "description": "The appcrane_* tool you were using."
+            },
+            "task": {
+              "type": "string",
+              "maxLength": 1000,
+              "description": "What the user asked you to do."
+            },
+            "deploy_id": {
+              "type": [
+                "string",
+                "integer"
+              ],
+              "description": "The deploy id, if one is involved."
+            },
+            "error": {
+              "type": "string",
+              "description": "The error text you got. Cut to 4096 characters."
+            },
+            "client": {
+              "type": "string",
+              "maxLength": 200,
+              "description": "Your client name and version, e.g. \"Claude Code 2.1\"."
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "message"
       ],
       "additionalProperties": false
     }

@@ -30,7 +30,7 @@ There is no hosted service and no AppCrane account. The flow is entirely your ow
 npx appcrane-mcp
 ```
 
-With no environment variables it still starts and answers `tools/list` from the bundled catalog (57 tools). To actually invoke tools against your instance, set:
+With no environment variables it still starts and answers `tools/list` from the bundled catalog (74 tools). To actually invoke tools against your instance, set:
 
 | Env var | Required | Description |
 | --- | --- | --- |
