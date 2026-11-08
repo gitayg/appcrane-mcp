@@ -101,7 +101,7 @@
   },
   {
     "name": "appcrane_get_secret",
-    "description": "List an app's secrets (encrypted env vars) with their values MASKED — safe to show in chat. For each key you get: is_set, length, a short preview (last 3 chars, rest masked; fully masked for short values), a keyed `fingerprint` (compare two envs or detect a changed value without seeing it; it cannot be checked against guesses), and updated_at. For a PRODUCTION value you may not reveal (anyone but the app owner or a platform admin), length and fingerprint are left out and the preview is fully masked. This is what you want for \"is X set?\", \"did the key change?\", \"which vars exist?\". Does NOT return plaintext — a secret never lands in the transcript. To read one actual value, use appcrane_reveal_secret with a specific key. Defaults to sandbox; pass env=\"production\" only when the user explicitly says production. App-admin or AppCrane admin only.",
+    "description": "List an app's secrets (encrypted env vars) with their values MASKED — safe to show in chat. For each key you get: is_set, length, a short preview (last 3 chars, rest masked; fully masked for short values), a keyed `fingerprint` (compare two envs or detect a changed value without seeing it; it cannot be checked against guesses), and updated_at. For a PRODUCTION value you may not reveal (anyone but the app owner or a platform admin), length and fingerprint are left out and the preview is fully masked. This is what you want for \"is X set?\", \"did the key change?\", \"which vars exist?\". Does NOT return plaintext — a secret never lands in the transcript. To read one actual value, use appcrane_reveal_secret with a specific key. A var that is a Secrets Manager reference also has source=\"secrets_manager\" and value set to the reference text (secretsmanager:<NAME>[#field]); the value in AWS is never fetched. Defaults to sandbox; pass env=\"production\" only when the user explicitly says production. App-admin or AppCrane admin only.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -127,7 +127,7 @@
   },
   {
     "name": "appcrane_reveal_secret",
-    "description": "Reveal the PLAINTEXT of ONE secret by key. Use ONLY when the user explicitly needs the actual value — it will appear in this conversation transcript, so treat the transcript as sensitive afterward (and consider rotating the secret if the transcript may be stored/shared). For checking whether a var is set, comparing values, or seeing what exists, use appcrane_get_secret (masked) instead — do NOT reveal just to inspect config. Single key only — it never dumps the whole env. Every reveal is audit-logged. Defaults to sandbox; env=\"production\" only when the user explicitly asks. App admins can reveal sandbox values; a PRODUCTION value needs the app owner or a platform admin.",
+    "description": "Reveal the PLAINTEXT of ONE secret by key. Use ONLY when the user explicitly needs the actual value — it will appear in this conversation transcript, so treat the transcript as sensitive afterward (and consider rotating the secret if the transcript may be stored/shared). For checking whether a var is set, comparing values, or seeing what exists, use appcrane_get_secret (masked) instead — do NOT reveal just to inspect config. Single key only — it never dumps the whole env. Every reveal is audit-logged. For a Secrets Manager reference this returns the reference text with source=\"secrets_manager\" and never fetches the value from AWS. Defaults to sandbox; env=\"production\" only when the user explicitly asks. App admins can reveal sandbox values; a PRODUCTION value needs the app owner or a platform admin.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -248,7 +248,7 @@
   },
   {
     "name": "appcrane_promote",
-    "description": "Promote the current live SANDBOX release to production — the gated sandbox→prod path. Refuses unless sandbox is live AND currently healthy (you do not ship a broken sandbox to prod), and the promoted prod release is health-checked with auto-revert. For github apps this rebuilds production from the EXACT sandbox commit; for managed/upload apps it copies the exact tested sandbox release. Owner-only (or platform admin).",
+    "description": "Promote the current live SANDBOX release to production — the gated sandbox→prod path. Refuses unless sandbox is live AND currently healthy (you do not ship a broken sandbox to prod), and the promoted prod release is health-checked with auto-revert. For github and managed apps this rebuilds production from the EXACT sandbox commit; for upload apps, and any sandbox release made by appcrane_deploy_artifact, it copies the exact tested sandbox release. Owner-only (or platform admin).",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -1860,7 +1860,7 @@
   },
   {
     "name": "appcrane_set_secret",
-    "description": "Set or update a secret (an encrypted environment variable injected into the app). Encrypted at rest; only the running app process can read the plaintext. Defaults to sandbox; require explicit stage=\"production\" only when the user asks. App-admin or AppCrane admin only. Respects the caller's mcp_app_scope.",
+    "description": "Set or update a secret (an encrypted environment variable injected into the app). Encrypted at rest; only the running app process can read the plaintext. With store=\"secrets_manager\" (needs a secrets provider on this AppCrane) the value goes to AWS Secrets Manager under this app and env's own path, and AppCrane keeps only the reference secretsmanager:<KEY>; do not call it more than once every 10 minutes per key. You can also set a reference directly as the value: secretsmanager:<NAME> or secretsmanager:<NAME>#<jsonField>, where NAME holds only letters, digits, _ and - and always resolves under this app and env, never an ARN or a path. A reference is resolved at every deploy and restart, and one that cannot be read fails that deploy or restart. Removing the env var, or the app, does not delete the AWS secret. Defaults to sandbox; require explicit stage=\"production\" only when the user asks. App-admin or AppCrane admin only. Respects the caller's mcp_app_scope.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -1883,6 +1883,13 @@
         "value": {
           "type": "string",
           "description": "The value to store (will be encrypted server-side)."
+        },
+        "store": {
+          "type": "string",
+          "enum": [
+            "secrets_manager"
+          ],
+          "description": "Keep the value in AWS Secrets Manager instead of AppCrane's database. Omit for an ordinary encrypted env var."
         }
       },
       "required": [
