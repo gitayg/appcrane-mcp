@@ -1947,7 +1947,7 @@
   },
   {
     "name": "appcrane_list_cron",
-    "description": "List the scheduled jobs declared in an app's deployhub.json `cron` array (after the most recent deploy). Each entry includes the cron schedule, the command, when it last ran, the exit code, and the tail of the last run's stdout/stderr. Use to verify a job was registered, debug a missing run, or read the recent log. App-admin or owner.",
+    "description": "List the scheduled jobs of an app: those declared in its deployhub.json `cron` array (origin \"manifest\", kind \"exec\": a docker exec) and those AppCrane created from the `crons` of its vercel.json (origin \"vercel\", kind \"http\": GET http_path on the app's own container, with Authorization: Bearer CRON_SECRET when the app sets CRON_SECRET), as of the most recent deploy. Each entry includes the cron schedule (UTC), the command, when it last ran, the exit code (0 = success; for an http job, a 2xx answer), last_http_status for an http job, and the tail of the last run's output. Use to verify a job was registered, debug a missing run, or read the recent log. App-admin or owner.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -1971,7 +1971,7 @@
   },
   {
     "name": "appcrane_run_cron_now",
-    "description": "Trigger a scheduled cron job RIGHT NOW, regardless of its schedule. Useful for \"I want to test my daily rebuild without waiting until midnight\" or \"rerun yesterday's failed job.\" Runs the same `docker exec` the tick loop would, against the app's container; updates last_run_at / last_exit_code / last_log just like a scheduled run. Returns the exit code and last-log tail. App-admin or owner. Idempotent: if the job is already running (mutex held), reports it and skips rather than overlapping.",
+    "description": "Trigger a scheduled cron job RIGHT NOW, regardless of its schedule. Useful for \"I want to test my daily rebuild without waiting until midnight\" or \"rerun yesterday's failed job.\" Runs the same `docker exec` the tick loop would against the app's container, or for a job from vercel.json the same GET of its path; updates last_run_at / last_exit_code / last_log just like a scheduled run. Returns the exit code and last-log tail. App-admin or owner. Idempotent: if the job is already running (mutex held), reports it and skips rather than overlapping.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -1989,7 +1989,7 @@
         },
         "name": {
           "type": "string",
-          "description": "Job name from deployhub.json `cron[].name`."
+          "description": "Job name from deployhub.json `cron[].name`, or the vercel:<path> name appcrane_list_cron shows for a vercel.json cron."
         }
       },
       "required": [
