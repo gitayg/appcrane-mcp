@@ -127,7 +127,7 @@
   },
   {
     "name": "appcrane_reveal_secret",
-    "description": "Reveal the PLAINTEXT of ONE secret by key. Use ONLY when the user explicitly needs the actual value — it will appear in this conversation transcript, so treat the transcript as sensitive afterward (and consider rotating the secret if the transcript may be stored/shared). For checking whether a var is set, comparing values, or seeing what exists, use appcrane_get_secret (masked) instead — do NOT reveal just to inspect config. Single key only — it never dumps the whole env. Every reveal is audit-logged. For a Secrets Manager reference this returns the reference text with source=\"secrets_manager\" and never fetches the value from AWS. Defaults to sandbox; env=\"production\" only when the user explicitly asks. App admins can reveal sandbox values; a PRODUCTION value needs the app owner or a platform admin.",
+    "description": "Reveal the PLAINTEXT of ONE secret by key. Use ONLY when the user explicitly needs the actual value — it will appear in this conversation transcript, so treat the transcript as sensitive afterward (and consider rotating the secret if the transcript may be stored/shared). For checking whether a var is set, comparing values, or seeing what exists, use appcrane_get_secret (masked) instead — do NOT reveal just to inspect config. Single key only — it never dumps the whole env. Every reveal is audit-logged. For a Secrets Manager reference this returns the reference text with source=\"secrets_manager\" and never fetches the value from AWS. Defaults to sandbox; env=\"production\" only when the user explicitly asks. App admins can reveal sandbox values; a PRODUCTION value needs the app owner or a platform admin, and a person's recent confirmation: a call refused with STEP_UP_REQUIRED names a link for the user to open and confirm, then retry within the minutes it states.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -357,7 +357,7 @@
   },
   {
     "name": "appcrane_cat",
-    "description": "Print the contents of a file inside a running app container. Read-only; bound to safe roots (/app and /data only). Refuses files larger than 256KB; truncate by reading the first N bytes via path tricks if you need a tail.",
+    "description": "Print the contents of a file inside a running app container. Read-only; bound to safe roots (/app and /data only). Refuses files larger than 256KB; truncate by reading the first N bytes via path tricks if you need a tail. env=\"production\" needs the app owner or a platform admin and a person's recent confirmation, like appcrane_reveal_secret: a call refused with STEP_UP_REQUIRED names a link for the user to open and confirm.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -1463,8 +1463,69 @@
     }
   },
   {
+    "name": "appcrane_request_capability",
+    "description": "Ask a platform admin to approve a sensitive capability for an app: a managed database, sign-in bypass paths, headless mode, public visibility, a raw TCP/UDP host port, a custom domain without AppCrane sign-in, outbound e-mail, an external secret store connection, the LLM gateway, outbound internet hosts (egress) or a platform API connection (connection:<name>). Owner or app admin of the app. Give a reason and the narrowest scope that works; the admin may narrow it further and set an expiry. One open request per app and capability: asking again returns the open one. This only files the request: a platform admin decides it in the dashboard, and an agent can never approve one. Scope by capability (examples): managed_database {\"engines\":[\"postgres\"]}; auth_bypass_paths {\"paths\":[\"/webhooks\"]}; headless {}; public_visibility {}; tcp_ports {\"ingress_type\":\"tcp\",\"public_port\":null}; outbound_email {\"recipient_domains\":[\"example.test\"]}; external_secret_connections {\"providers\":[\"vault\"]}; custom_domain_unprotected {\"domains\":[\"app.example.test\"]}; llm_gateway {}; egress {\"hosts\":[\"api.example.test\"]}.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "slug": {
+          "type": "string",
+          "description": "App slug."
+        },
+        "capability": {
+          "type": "string",
+          "pattern": "^(managed_database|auth_bypass_paths|headless|public_visibility|tcp_ports|outbound_email|external_secret_connections|custom_domain_unprotected|llm_gateway|egress|connection:[a-z0-9][a-z0-9-]{0,62})$",
+          "description": "One of managed_database, auth_bypass_paths, headless, public_visibility, tcp_ports, outbound_email, external_secret_connections, custom_domain_unprotected, llm_gateway, egress, or connection:<name> for a platform connection (scope { methods, path_prefixes })."
+        },
+        "scope": {
+          "type": "object",
+          "description": "What exactly is needed, in the shape shown for the capability."
+        },
+        "reason": {
+          "type": "string",
+          "description": "Why the app needs it (required, up to 1000 characters)."
+        }
+      },
+      "required": [
+        "slug",
+        "capability",
+        "reason"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "appcrane_list_capability_requests",
+    "description": "See capability approvals. With slug: that app's policy per capability, its active grants (including grandfathered, unreviewed ones) and open requests; any member of the app. Without slug: platform admins get the platform-wide queue (status pending by default; unreviewed, active, flagged, denied or all), others get the open requests of the apps they own or administer.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "slug": {
+          "type": "string",
+          "description": "App slug (optional)."
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "unreviewed",
+            "active",
+            "flagged",
+            "approved",
+            "denied",
+            "cancelled",
+            "expired",
+            "revoked",
+            "all"
+          ]
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
     "name": "appcrane_delete_app",
-    "description": "Permanently delete an app from AppCrane. IRREVERSIBLE. Stops and removes its sandbox and production containers, images and Docker volume records, drops its managed databases, and deletes its rows (deployments, env vars, health, webhooks, backups records, roles, sessions); Caddy routes are removed. Pass confirm_slug equal to slug, typed out: a call without it, or with any other value, is refused and changes nothing. Ask the user before calling this. Only the app's owner or a platform admin may delete, and only when the role matrix also grants app.delete (the same gate as the dashboard's Delete button). Read-only keys, the coder's connection, and keys whose MCP scope excludes the app are refused. Kept: the audit trail; files under the app's data directory on the host; for a Crane-hosted (local git) managed app its bare repository at DATA_DIR/repos/<slug>.git, so a new managed app cannot reuse the slug until an operator removes that repository; a GitHub repository is never touched.",
+    "description": "Permanently delete an app from AppCrane. IRREVERSIBLE. Stops and removes its sandbox and production containers, images and Docker volume records, drops its managed databases, and deletes its rows (deployments, env vars, health, webhooks, backups records, roles, sessions); Caddy routes are removed. Pass confirm_slug equal to slug, typed out: a call without it, or with any other value, is refused and changes nothing. Ask the user before calling this. A key or agent also needs the user's recent confirmation: a call refused with STEP_UP_REQUIRED names a link for the user to open and confirm, then retry within the minutes it states. Only the app's owner or a platform admin may delete, and only when the role matrix also grants app.delete (the same gate as the dashboard's Delete button). Read-only keys, the coder's connection, and keys whose MCP scope excludes the app are refused. Kept: the audit trail; files under the app's data directory on the host; for a Crane-hosted (local git) managed app its bare repository at DATA_DIR/repos/<slug>.git, so a new managed app cannot reuse the slug until an operator removes that repository; a GitHub repository is never touched.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -1486,7 +1547,7 @@
   },
   {
     "name": "appcrane_get_audit",
-    "description": "Read an app's audit trail: who deployed, who changed env vars or secrets, who was granted access, every MCP tool call against it, newest first. Needs the app.audit.view permission on that app (default: the app owner, app admins and platform admins; plain members are refused unless the role matrix grants it). Paginate with before: pass the next_before value from the previous page to get older rows; next_before is null on the last page. limit defaults to 50, max 200. action filters by a substring of the action name, e.g. \"deploy\", \"env\", \"mcp.appcrane_set_secret\". Credential-bearing fields in detail are shown as [redacted].",
+    "description": "Read an app's audit trail: who deployed, who changed env vars or secrets, who was granted access, every MCP tool call against it, newest first. Needs the app.audit.view permission on that app (default: the app owner, app admins and platform admins; plain members are refused unless the role matrix grants it). Paginate with before: pass the next_before value from the previous page to get older rows; next_before is null on the last page. limit defaults to 50, max 200. action filters by a substring of the action name, e.g. \"deploy\", \"env\", \"mcp.appcrane_set_secret\". Credential-bearing fields in detail are shown as [redacted]. source \"app\" reads instead the audit events the app itself wrote (POST /api/service/audit/events with its service token): action is then an exact action or a prefix ending in \".\" (e.g. \"invoice.\"), and each event carries actor, targets, context and metadata; actor.verified is false when the actor is only what the app reported.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -1504,7 +1565,15 @@
         },
         "action": {
           "type": "string",
-          "description": "Only rows whose action contains this text."
+          "description": "Only rows whose action contains this text (source \"app\": exact action, or a prefix ending in \".\")."
+        },
+        "source": {
+          "type": "string",
+          "enum": [
+            "platform",
+            "app"
+          ],
+          "description": "platform (default): what AppCrane recorded about the app. app: the audit events the app wrote itself."
         }
       },
       "required": [
@@ -1589,7 +1658,7 @@
   },
   {
     "name": "appcrane_create_managed_app",
-    "description": "Create a new managed app — AppCrane creates and owns its git repository, and the agent works against it through appcrane_push_to_managed_app / appcrane_managed_* tools without the end user ever needing a GitHub account or PAT. New managed apps are hosted on this AppCrane server: there is no GitHub repo and no web URL, so github_* tools cannot reach it (managed apps created before this keep their GitHub repo and work as before). Use this when the user does not have a GitHub account or does not want to deal with GitHub at all. Returns the same shape as appcrane_create_app, plus the repo metadata. IDEMPOTENT RECOVERY: if the slug already exists as a managed app but its AMC_ repo was never created (a half-created app from an earlier failure — push then returns REPO_NOT_FOUND), calling this again re-provisions the missing repo where that app's repo belongs and returns { repaired: true } instead of erroring. So if a create attempt half-failed, just call it again with the same slug. Owner-or-admin to repair an existing one.",
+    "description": "Create a new managed app — AppCrane creates and owns its git repository, and the agent works against it through appcrane_push_to_managed_app / appcrane_managed_* tools without the end user ever needing a GitHub account or PAT. New managed apps are hosted on this AppCrane server: there is no GitHub repo and no web URL, so github_* tools cannot reach it (managed apps created before this keep their GitHub repo and work as before). Use this when the user does not have a GitHub account or does not want to deal with GitHub at all. Returns the same shape as appcrane_create_app, plus the repo metadata. IDEMPOTENT RECOVERY: if the slug already exists as a managed app but its AMC_ repo was never created (a half-created app from an earlier failure — push then returns REPO_NOT_FOUND), calling this again re-provisions the missing repo where that app's repo belongs and returns { repaired: true } instead of erroring. So if a create attempt half-failed, just call it again with the same slug. Owner-or-admin to repair an existing one. TEMPLATE: pass template (node-react, python-fastapi or static-site) to commit a golden-path starter as the repo's first commit: identity middleware that verifies AppCrane's signed X-AppCrane-* headers and refuses unsigned ones, a role check, managed Postgres with a migration (not static-site), /api/health, tests, env.example, README and CLAUDE.md. The response's template field reports the commit; no deploy is started.",
     "inputSchema": {
       "type": "object",
       "properties": {
@@ -1620,6 +1689,15 @@
         "max_cpu_percent": {
           "type": "number",
           "description": "Per-container CPU cap. Default: 50."
+        },
+        "template": {
+          "type": "string",
+          "enum": [
+            "node-react",
+            "python-fastapi",
+            "static-site"
+          ],
+          "description": "Optional. Seed the new repo with this starter template (slug and name filled in). node-react: Express + React (Vite); python-fastapi: FastAPI with its own Dockerfile; static-site: public/ served by a dependency-free Node server. Omit for an empty repo."
         },
         "intake": {
           "type": "object",
