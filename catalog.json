@@ -178,6 +178,10 @@
         "acknowledge_data_loss": {
           "type": "boolean",
           "description": "Confirms that the state at the paths named in this tool's DATA_LOSS_NOT_ACKNOWLEDGED error may be destroyed. Only set it after the error has told you which paths those are AND the user has agreed to lose them. Ignored when nothing is at risk."
+        },
+        "label": {
+          "type": "string",
+          "description": "Optional release label shown in the release log and usable as a filter there, e.g. \"rules=v3\". 1-40 of letters, digits and . _ = -"
         }
       },
       "required": [
@@ -209,6 +213,40 @@
           "minimum": 1,
           "maximum": 50,
           "description": "Max rows (default 10)."
+        }
+      },
+      "required": [
+        "slug"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "appcrane_list_app_releases",
+    "description": "The release log of an app: every deployment per environment, newest first, with a derived status (live / replaced / rolled back / failed / auto-reverted / in progress), its label, What's New text, who deployed it (person or agent), commit, how long it was live, and what the app saw while it was live (requests, active users, restarts, and the same per day). Error rate and p95 latency are always null: AppCrane does not record them. Filter by env and label to compare releases, e.g. label \"rules=v3\" against \"rules=v2\". Owner, app admin or platform admin only. For a plain deploy history any member can read, use appcrane_list_releases.",
+    "inputSchema": {
+      "type": "object",
+      "properties": {
+        "slug": {
+          "type": "string"
+        },
+        "stage": {
+          "type": "string",
+          "enum": [
+            "sandbox",
+            "production"
+          ],
+          "description": "Omit for both environments. Target stage (legacy alias: env)."
+        },
+        "label": {
+          "type": "string",
+          "description": "Only releases with exactly this label."
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 200,
+          "description": "Max rows (default 50)."
         }
       },
       "required": [
